@@ -1,0 +1,62 @@
+{
+  "name": "kirodesk",
+  "version": "1.0.0",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && npm run build:css && npm run build:renderer && npm run copy-assets",
+    "build:css": "npx tailwindcss -i ./src/renderer/styles.css -o ./dist/renderer/styles.css",
+    "build:renderer": "npx esbuild src/renderer/app.tsx --bundle --outfile=dist/renderer/app.js --platform=browser --external:electron",
+    "copy-assets": "node -e \"require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html')\"",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev",
+    "package": "electron-builder"
+  },
+  "build": {
+    "appId": "com.aws.kirodesk",
+    "productName": "KiroDesk",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "autoprefixer": "^10.4.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "esbuild": "^0.19.12",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@types/uuid": "^9.0.0",
+    "fs-extra": "^11.2.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-markdown": "^9.0.0",
+    "uuid": "^9.0.0"
+  },
+  "optionalDependencies": {
+    "@esbuild/win32-x64": "^0.27.2"
+  }
+}

@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-900 text-gray-100;
+  }
+  
+  html.light {
+    @apply bg-white text-gray-900;
+  }
+  
+  html.light body {
+    @apply bg-white text-gray-900;
+  }
+  
+  html.light .bg-gray-900 {
+    @apply bg-white;
+  }
+  
+  html.light .bg-gray-800 {
+    @apply bg-gray-100;
+  }
+  
+  html.light .bg-gray-700 {
+    @apply bg-gray-200;
+  }
+  
+  html.light .border-gray-700 {
+    @apply border-gray-300;
+  }
+  
+  html.light .text-gray-100 {
+    @apply text-gray-900;
+  }
+  
+  html.light .text-gray-400 {
+    @apply text-gray-600;
+  }
+  
+  html.light .text-gray-500 {
+    @apply text-gray-700;
+  }
+}
+
+@layer components {
+  .message-content h1 {
+    @apply text-2xl font-bold mt-4 mb-2;
+  }
+  
+  .message-content h2 {
+    @apply text-xl font-bold mt-3 mb-2;
+  }
+  
+  .message-content h3 {
+    @apply text-lg font-semibold mt-2 mb-1;
+  }
+  
+  .message-content p {
+    @apply my-2;
+  }
+  
+  .message-content code {
+    @apply bg-gray-800 px-1.5 py-0.5 rounded text-sm font-mono text-blue-400;
+  }
+  
+  html.light .message-content code {
+    @apply bg-gray-200 text-blue-600;
+  }
+  
+  .message-content pre {
+    @apply bg-gray-800 p-4 rounded-lg overflow-x-auto my-3;
+  }
+  
+  html.light .message-content pre {
+    @apply bg-gray-200;
+  }
+  
+  .message-content pre code {
+    @apply bg-transparent p-0 text-gray-300;
+  }
+  
+  html.light .message-content pre code {
+    @apply text-gray-800;
+  }
+  
+  .message-content ul,
+  .message-content ol {
+    @apply my-2 pl-6;
+  }
+  
+  .message-content li {
+    @apply my-1;
+  }
+  
+  .message-content ul li {
+    @apply list-disc;
+  }
+  
+  .message-content ol li {
+    @apply list-decimal;
+  }
+  
+  [draggable="true"] {
+    cursor: grab;
+  }
+  
+  [draggable="true"]:active {
+    cursor: grabbing;
+    opacity: 0.5;
+  }
+}
