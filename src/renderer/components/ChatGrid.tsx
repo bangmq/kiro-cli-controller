@@ -98,24 +98,24 @@ const ChatGrid: React.FC<Props> = ({
     <div className="relative h-full">
       {/* 실제 채팅 화면 */}
       {!isDragging && activeCount > 0 && (
-        <div className={`grid ${getGridClass()} gap-1 h-full bg-gray-900`}>
+        <div className={`grid ${getGridClass()} gap-0.5 h-full bg-gray-900`}>
           {gridCells.map((cell, index) => 
             cell.projects.length > 0 ? (
-              <div key={index} className="relative flex flex-col border border-gray-700 rounded-lg overflow-hidden bg-gray-800">
+              <div key={index} className="relative flex flex-col border border-gray-700 rounded-md overflow-hidden bg-gray-800">
                 {/* 탭 바 */}
-                <div className="flex items-center gap-1 px-2 py-1 bg-gray-800 border-b border-gray-700 overflow-x-auto">
+                <div className="flex items-center gap-1 px-1.5 py-1 bg-gray-800 border-b border-gray-700 overflow-x-auto">
                   {cell.projects.map(project => (
                     <div
                       key={project.id}
                       draggable
                       onDragStart={() => onTabDragStart(index, project.id)}
                       onClick={() => onTabSelect(index, project.id)}
-                      className={`flex items-center gap-2 px-2 py-1 rounded text-xs cursor-pointer transition-colors ${
+                      className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] cursor-pointer transition-colors ${
                         cell.activeProjectId === project.id ? 'bg-gray-700' : 'bg-gray-750 hover:bg-gray-700'
                       }`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${project.type === 'maintenance' ? 'bg-orange-400' : 'bg-green-400'}`} />
-                      <span className="truncate max-w-[80px]">{project.name}</span>
+                      <div className={`w-1 h-1 rounded-full ${project.type === 'maintenance' ? 'bg-orange-400' : 'bg-green-400'}`} />
+                      <span className="truncate max-w-[70px]">{project.name}</span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -141,7 +141,7 @@ const ChatGrid: React.FC<Props> = ({
                 {/* 그리드 닫기 버튼 */}
                 <button
                   onClick={() => onClose(index)}
-                  className="absolute top-1 right-1 z-10 p-1 bg-gray-900/80 hover:bg-red-600 rounded transition-colors"
+                  className="absolute top-1 right-1 z-10 p-0.5 bg-gray-900/80 hover:bg-red-600 rounded transition-colors"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

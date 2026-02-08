@@ -49,6 +49,14 @@ class ProjectManager {
     }
   }
 
+  async updateMainAgent(id: string, mainAgent: string): Promise<void> {
+    const project = this.data.projects.find(p => p.id === id);
+    if (project) {
+      project.mainAgent = mainAgent;
+      await this.save();
+    }
+  }
+
   async deleteProject(id: string): Promise<void> {
     this.data.projects = this.data.projects.filter(p => p.id !== id);
     await this.save();

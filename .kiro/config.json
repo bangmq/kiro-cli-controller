@@ -1,0 +1,18 @@
+{
+  "projectPath": "/Users/bangmq/Desktop/kiroTester/kiro-cli-controller",
+  "type": "maintenance",
+  "createdAt": "2026-02-06T04:42:58.160Z",
+  "agentSettings": {
+    "mainAgentFile": "analyst.json",
+    "subAgentFiles": [
+      "coder.json",
+      "pm.json"
+    ],
+    "agentSkills": {},
+    "agentSteering": {},
+    "mainAgentSubAgents": [
+      "coder.json",
+      "pm.json"
+    ]
+  }
+}

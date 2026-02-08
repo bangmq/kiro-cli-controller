@@ -108,10 +108,18 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/50 backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold truncate">{project.name}</div>
+          <div className="flex items-center gap-3">
+            <div className="text-xs text-gray-400">{project.mainAgent}</div>
+          </div>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+            <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
               msg.role === 'user' 
                 ? 'bg-blue-600 text-white' 
                 : 'bg-gray-800 text-gray-100'
@@ -128,11 +136,11 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
         ))}
         {currentIsLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 rounded-2xl px-4 py-3">
+            <div className="bg-gray-800 rounded-xl px-3 py-2">
               <div className="flex space-x-2">
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
               </div>
             </div>
           </div>
@@ -140,8 +148,8 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
         <div ref={messagesEndRef} />
       </div>
       
-      <div className="p-4 border-t border-gray-700 bg-gray-800/50 backdrop-blur">
-        <div className="flex gap-3">
+      <div className="p-3 border-t border-gray-700 bg-gray-800/50 backdrop-blur">
+        <div className="flex gap-2">
           <input
             type="text"
             value={input}
@@ -149,12 +157,12 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
             onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder={t('typeMessage')}
             disabled={currentIsLoading}
-            className="flex-1 bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 transition-all"
+            className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 transition-all"
           />
           <button 
             onClick={handleSend} 
             disabled={currentIsLoading || !input.trim()}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-xl font-medium transition-colors"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
           >
             {t('send')}
           </button>

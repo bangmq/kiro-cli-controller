@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   createProject: (name: string, path: string, type: 'maintenance' | 'new-development') => 
     ipcRenderer.invoke('create-project', name, path, type),
@@ -15,5 +16,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('cli-error', (_, projectId, error) => callback(projectId, error)),
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
-  windowClose: () => ipcRenderer.invoke('window-close')
+  windowClose: () => ipcRenderer.invoke('window-close'),
+  kiroAuthStatus: () => ipcRenderer.invoke('kiro-auth-status'),
+  kiroLogin: () => ipcRenderer.invoke('kiro-login'),
+  kiroLogout: () => ipcRenderer.invoke('kiro-logout'),
+  getProjectConfig: (projectPath: string) => ipcRenderer.invoke('get-project-config', projectPath),
+  saveProjectAgents: (projectPath: string, agents: any[]) => ipcRenderer.invoke('save-project-agents', projectPath, agents),
+  saveProjectFiles: (projectPath: string, kind: 'skills' | 'steering', files: any[]) => ipcRenderer.invoke('save-project-files', projectPath, kind, files),
+  saveProjectMeta: (projectPath: string, meta: any) => ipcRenderer.invoke('save-project-meta', projectPath, meta),
+  updateProjectMainAgent: (projectId: string, mainAgent: string) => ipcRenderer.invoke('update-project-main-agent', projectId, mainAgent)
 });

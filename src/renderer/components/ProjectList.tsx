@@ -15,13 +15,15 @@ interface Props {
   selectedProject: Project | null;
   onSelect: (project: Project) => void;
   onDelete: (id: string) => void;
+  onOpenSettings: (project: Project) => void;
 }
 
-const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onDelete }) => {
+const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onDelete, onOpenSettings }) => {
   const { isLoading } = useConversation();
   const { t } = useI18n();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [infoProject, setInfoProject] = useState<Project | null>(null);
 
   useEffect(() => {
     const handleClickOutside = () => setOpenMenuId(null);
@@ -37,32 +39,32 @@ const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onD
         <div 
           key={project.id}
           onClick={() => onSelect(project)}
-          className={`p-4 border-b border-gray-700 cursor-pointer transition-colors hover:bg-gray-750 ${
+          className={`p-3 border-b border-gray-700 cursor-pointer transition-colors hover:bg-gray-750 ${
             selectedProject?.id === project.id ? 'bg-gray-700' : ''
           }`}
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className={`p-2 rounded-lg ${project.type === 'maintenance' ? 'bg-orange-500/20' : 'bg-green-500/20'}`}>
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className={`p-1.5 rounded-md ${project.type === 'maintenance' ? 'bg-orange-500/20' : 'bg-green-500/20'}`}>
                 {project.type === 'maintenance' ? (
-                  <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                 ) : (
-                  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-medium truncate">{project.name}</h4>
+                  <h4 className="text-sm font-medium truncate">{project.name}</h4>
                   {isLoading(project.id) && (
                     <div className="flex space-x-1">
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                      <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                      <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                      <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
                     </div>
                   )}
                 </div>
@@ -91,20 +93,20 @@ const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onD
                     onClick={(e) => {
                       e.stopPropagation();
                       setOpenMenuId(null);
-                      // TODO: 정보 기능
+                      setInfoProject(project);
                     }}
                     className="w-full px-4 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2 rounded-t-lg"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    정보
+                    {t('info')}
                   </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setOpenMenuId(null);
-                      // TODO: 설정 기능
+                      onOpenSettings(project);
                     }}
                     className="w-full px-4 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2"
                   >
@@ -112,7 +114,7 @@ const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onD
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    설정
+                    {t('settings')}
                   </button>
                   <button
                     onClick={(e) => {
@@ -153,6 +155,28 @@ const ProjectList: React.FC<Props> = ({ projects, selectedProject, onSelect, onD
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
               >
                 삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {infoProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setInfoProject(null)}>
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-3">{t('projectInfo')}</h3>
+            <div className="space-y-2 text-sm text-gray-300">
+              <p><span className="text-gray-400">{t('projectName')}:</span> {infoProject.name}</p>
+              <p><span className="text-gray-400">{t('path')}:</span> {infoProject.path}</p>
+              <p><span className="text-gray-400">{t('type')}:</span> {infoProject.type === 'maintenance' ? t('maintenance') : t('newDevelopment')}</p>
+              <p><span className="text-gray-400">{t('agent')}:</span> {infoProject.mainAgent}</p>
+              <p><span className="text-gray-400">{t('lastAccess')}:</span> {infoProject.lastAccess || '-'}</p>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setInfoProject(null)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-md transition-colors text-sm"
+              >
+                {t('cancel')}
               </button>
             </div>
           </div>

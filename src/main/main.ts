@@ -1,12 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu, Tray } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs-extra';
 import { projectManager } from './projectManager';
 import { kiroCliManager } from './kiroCliManager';
+import { projectConfigManager } from './projectConfig';
 
 let mainWindow: BrowserWindow;
 let tray: Tray | null = null;
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -15,8 +18,8 @@ function createWindow(): void {
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/preload.js')
     },
-    titleBarStyle: 'hidden',
-    frame: false,
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    frame: !isMac,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff'
   });
 
@@ -80,7 +83,11 @@ function createMacMenu(): void {
 
 function createTray(): void {
   if (process.platform === 'darwin') {
-    tray = new Tray(path.join(__dirname, '../../assets/tray-icon.png'));
+    const trayPath = path.join(__dirname, '../../assets/tray-icon.png');
+    if (!fs.existsSync(trayPath)) {
+      return;
+    }
+    tray = new Tray(trayPath);
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show KiroDesk', click: () => mainWindow?.show() },
       { type: 'separator' },
@@ -158,6 +165,10 @@ function setupIpcHandlers() {
     return await projectManager.getProjects();
   });
 
+  ipcMain.handle('update-project-main-agent', async (_event, id: string, mainAgent: string) => {
+    await projectManager.updateMainAgent(id, mainAgent);
+  });
+
   ipcMain.handle('delete-project', async (_, id: string) => {
     await projectManager.deleteProject(id);
     if (process.platform === 'win32') {
@@ -167,18 +178,38 @@ function setupIpcHandlers() {
 
   ipcMain.handle('send-message', (event, projectId: string, projectPath: string, agent: string, message: string) => {
     console.log(`[Main] Sending message for project ${projectId}: ${message}`);
-    kiroCliManager.executeCommand(
-      projectId,
-      { projectPath, agent, message },
-      (data) => {
-        console.log(`[Main] Output for ${projectId}:`, data.substring(0, 100));
-        event.sender.send('cli-output', projectId, data);
-      },
-      (error) => {
-        console.log(`[Main] Error for ${projectId}:`, error);
-        event.sender.send('cli-error', projectId, error);
-      }
-    );
+    try {
+      kiroCliManager.executeCommand(
+        projectId,
+        { projectPath, agent, message },
+        (data) => {
+          console.log(`[Main] Output for ${projectId}:`, data.substring(0, 100));
+          event.sender.send('cli-output', projectId, data);
+        },
+        (error) => {
+          console.log(`[Main] Error for ${projectId}:`, error);
+          event.sender.send('cli-error', projectId, error);
+        }
+      );
+    } catch (error: any) {
+      event.sender.send('cli-error', projectId, error?.message || 'Failed to send message');
+    }
+  });
+
+  ipcMain.handle('get-project-config', async (_event, projectPath: string) => {
+    return await projectConfigManager.load(projectPath);
+  });
+
+  ipcMain.handle('save-project-agents', async (_event, projectPath: string, agents: any[]) => {
+    await projectConfigManager.saveAgents(projectPath, agents);
+  });
+
+  ipcMain.handle('save-project-files', async (_event, projectPath: string, kind: 'skills' | 'steering', files: any[]) => {
+    await projectConfigManager.saveFiles(projectPath, kind, files);
+  });
+
+  ipcMain.handle('save-project-meta', async (_event, projectPath: string, meta: any) => {
+    await projectConfigManager.saveMeta(projectPath, meta);
   });
 
   ipcMain.handle('stop-command', () => {
@@ -203,5 +234,17 @@ function setupIpcHandlers() {
 
   ipcMain.handle('window-close', () => {
     mainWindow.close();
+  });
+
+  ipcMain.handle('kiro-auth-status', async () => {
+    return kiroCliManager.getAuthStatus();
+  });
+
+  ipcMain.handle('kiro-login', async () => {
+    return kiroCliManager.login();
+  });
+
+  ipcMain.handle('kiro-logout', async () => {
+    return kiroCliManager.logout();
   });
 }

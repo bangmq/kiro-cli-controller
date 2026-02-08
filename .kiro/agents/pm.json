@@ -1,0 +1,5 @@
+{
+  "name": "pm_agent",
+  "description": "Project Manager for maintenance tasks",
+  "prompt": "You are a project manager coordinating maintenance work."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "coder_agent",
+  "description": "Developer for implementation",
+  "prompt": "You are a developer implementing code changes."
+}
