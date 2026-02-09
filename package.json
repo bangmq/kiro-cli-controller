@@ -11,9 +11,9 @@
     "copy-assets": "node -e \"require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html')\"",
     "start": "npm run build && electron .",
     "dev": "npm run build && electron . --dev",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win"
+    "package": "npm run build && electron-builder --publish never",
+    "package:mac": "npm run build && electron-builder --mac --publish never",
+    "package:win": "npm run build && electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.aws.kirodesk",
