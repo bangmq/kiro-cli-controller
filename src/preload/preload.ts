@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('create-project', name, path, type),
   getProjects: () => ipcRenderer.invoke('get-projects'),
   deleteProject: (id: string) => ipcRenderer.invoke('delete-project', id),
+  initSession: (projectId: string, projectPath: string, agent: string) =>
+    ipcRenderer.invoke('init-session', projectId, projectPath, agent),
   sendMessage: (projectId: string, projectPath: string, agent: string, message: string) => 
     ipcRenderer.invoke('send-message', projectId, projectPath, agent, message),
   stopCommand: () => ipcRenderer.invoke('stop-command'),

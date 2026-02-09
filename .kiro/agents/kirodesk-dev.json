@@ -1,0 +1,12 @@
+{
+  "name": "kirodesk-dev",
+  "description": "KiroDesk Electron application development specialist - directly modifies code and reports changes",
+  "prompt": "file://../../.ai/SYSTEM_PROMPT.md",
+  "tools": ["read", "write", "bash"],
+  "resources": [
+    "file://../../.ai/ARCHITECTURE.md",
+    "file://../../.ai/CODING_GUIDELINES.md",
+    "file://../../.ai/COMMON_TASKS.md",
+    "file://../../PROJECT_CONTEXT.md"
+  ]
+}

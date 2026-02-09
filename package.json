@@ -1,6 +1,8 @@
 {
   "name": "kirodesk",
   "version": "1.0.0",
+  "description": "Kiro CLI Multi-Project Controller",
+  "author": "AWS",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.main.json && npm run build:css && npm run build:renderer && npm run copy-assets",
@@ -9,7 +11,9 @@
     "copy-assets": "node -e \"require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html')\"",
     "start": "npm run build && electron .",
     "dev": "npm run build && electron . --dev",
-    "package": "electron-builder"
+    "package": "npm run build && electron-builder",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win"
   },
   "build": {
     "appId": "com.aws.kirodesk",
@@ -19,20 +23,40 @@
     },
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
       ]
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "devDependencies": {

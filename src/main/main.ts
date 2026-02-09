@@ -176,6 +176,28 @@ function setupIpcHandlers() {
     }
   });
 
+  ipcMain.handle('init-session', (event, projectId: string, projectPath: string, agent: string) => {
+    console.log(`[Main] Initializing session for project ${projectId}`);
+    return new Promise((resolve) => {
+      kiroCliManager.initSession(
+        projectId,
+        { projectPath, agent, message: '' },
+        () => {
+          console.log(`[Main] Session ready for ${projectId}`);
+          resolve({ ready: true });
+        },
+        (data) => {
+          event.sender.send('cli-output', projectId, data);
+        },
+        (error) => {
+          console.log(`[Main] Session error for ${projectId}:`, error);
+          event.sender.send('cli-error', projectId, error);
+          resolve({ ready: false, error });
+        }
+      );
+    });
+  });
+
   ipcMain.handle('send-message', (event, projectId: string, projectPath: string, agent: string, message: string) => {
     console.log(`[Main] Sending message for project ${projectId}: ${message}`);
     try {

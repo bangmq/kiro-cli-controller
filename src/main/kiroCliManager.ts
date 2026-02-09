@@ -1,8 +1,7 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
-import * as pty from 'node-pty';
 
 export interface KiroCliOptions {
   projectPath: string;
@@ -16,31 +15,52 @@ interface SessionCallbacks {
 }
 
 interface KiroSession {
-  proc: pty.IPty;
+  proc: any;
   projectId: string;
-  projectPath: string;
-  agent: string;
+  buffer: string;
   callbacks: SessionCallbacks;
-  lastUserMessage: string | null;
-  ttyLine: string[];
-  ttyCursor: number;
-  waitForPrompt: boolean;
-  echoPending: boolean;
+  stdin: any;
+  flushTimer?: NodeJS.Timeout;
+  responseStarted: boolean;
+  ready: boolean;
+  pendingMessage?: string;
+  onReady?: () => void;
 }
 
 export class KiroCliManager {
   private sessions: Map<string, KiroSession> = new Map();
+  private wslKiroPath: string | null = null;
 
-  private runKiroCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  private getWslKiroPath(): string {
+    if (this.wslKiroPath) return this.wslKiroPath;
+    
+    try {
+      const result = execSync('wsl -e bash -c "which kiro-cli 2>/dev/null || echo \\$HOME/.local/bin/kiro-cli"', { 
+        encoding: 'utf8',
+        timeout: 3000
+      }).trim();
+      this.wslKiroPath = result || '$HOME/.local/bin/kiro-cli';
+      console.log('[KiroCliManager] WSL kiro-cli path:', this.wslKiroPath);
+      return this.wslKiroPath;
+    } catch (err: any) {
+      console.error('[KiroCliManager] Failed to detect WSL kiro-cli path:', err.message);
+      this.wslKiroPath = '$HOME/.local/bin/kiro-cli';
+      return this.wslKiroPath;
+    }
+  }
+
+  private runKiroCli(args: string[], cwd?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const isWindows = process.platform === 'win32';
       let command: string;
       let spawnArgs: string[];
 
       if (isWindows) {
-        const kiroCliPath = '/home/blake/.local/bin/kiro-cli';
+        const kiroCliPath = this.getWslKiroPath();
+        const wslCwd = cwd ? cwd.replace(/\\/g, '/').replace(/^([A-Z]):/, (_, d) => `/mnt/${d.toLowerCase()}`) : '';
+        const cdCmd = wslCwd ? `cd "${wslCwd}" && ` : '';
         const escapedArgs = args.map((arg) => `'${arg.replace(/'/g, `'"'"'`)}'`).join(' ');
-        const bashCommand = `export LANG=C.UTF-8 && ${kiroCliPath} ${escapedArgs}`;
+        const bashCommand = `${cdCmd}${kiroCliPath} ${escapedArgs}`;
         command = 'wsl';
         spawnArgs = ['-e', 'bash', '-c', bashCommand];
       } else {
@@ -49,12 +69,12 @@ export class KiroCliManager {
       }
 
       const proc = spawn(command, spawnArgs, {
-        shell: false,
+        cwd: isWindows ? undefined : cwd,
         env: {
           ...process.env,
-          PATH: `${process.env.PATH || ''}:${process.env.HOME || ''}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin`
-        },
-        windowsHide: true
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8'
+        }
       });
 
       let stdout = '';
@@ -104,109 +124,6 @@ export class KiroCliManager {
       }
     }
     return 'kiro-cli';
-  }
-
-  private stripAnsi(str: string) {
-    return str
-      .replace(/\x1b\[[0-9; ]*m/g, '')
-      .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
-      .replace(/\x1b\[\?[0-9;]*[a-zA-Z]/g, '')
-      .replace(/\x1b\][0-9;]*.*?(\x07|\x1b\\)/g, '')
-      .replace(/\x1b[=>]/g, '')
-      .replace(/[\x00-\x07\x0B\x0C\x0E-\x1F\x7F]/g, '');
-  }
-
-  private normalizeOutput(str: string) {
-    return str.replace(/\r\n/g, '\n').replace(/\u00a0/g, ' ');
-  }
-
-  private renderTtyChunk(session: KiroSession, str: string) {
-    const lines: string[] = [];
-
-    for (let i = 0; i < str.length; i += 1) {
-      const ch = str[i];
-      if (ch === '\n') {
-        lines.push(session.ttyLine.join(''));
-        session.ttyLine = [];
-        session.ttyCursor = 0;
-        continue;
-      }
-      if (ch === '\r') {
-        session.ttyCursor = 0;
-        continue;
-      }
-      if (ch === '\b') {
-        if (session.ttyCursor > 0) {
-          session.ttyCursor -= 1;
-          session.ttyLine.splice(session.ttyCursor, 1);
-        }
-        continue;
-      }
-      if (session.ttyCursor === session.ttyLine.length) {
-        session.ttyLine.push(ch);
-      } else {
-        session.ttyLine[session.ttyCursor] = ch;
-      }
-      session.ttyCursor += 1;
-    }
-
-    return lines.join('\n');
-  }
-
-  private stripPrompt(line: string) {
-    return line.replace(/^.*\[[^\]]+\]\s*>\s?/, '');
-  }
-
-  private stripInlineThinking(line: string) {
-    return line.replace(/(?:\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+Thinking\.\.\.)+/g, '');
-  }
-
-  private isSpinnerOnly(line: string) {
-    return /^\s*(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+Thinking\.\.\.\s*)+$/.test(line);
-  }
-
-  private isBannerLine(line: string) {
-    const trimmed = line.trim();
-    if (!trimmed) return true;
-    if (/\[[^\]]+\]\s*>\s*/.test(trimmed)) return false;
-    if (/^[╭╰│]/.test(trimmed)) return true;
-    if (/^Did you know\?$/i.test(trimmed)) return true;
-    if (/^Model:\s+/i.test(trimmed)) return true;
-    if (/^▸\s*Time:/i.test(trimmed)) return true;
-    // ASCII art / box drawing line with heavy block characters
-    if (/[⣴⣶⣦⣿⡇⡆⢿⠟⠿]/.test(trimmed)) return true;
-    return false;
-  }
-
-  private normalizeForEcho(value: string) {
-    return value
-      .replace(/[\p{Z}\p{Cf}\p{Cc}]/gu, '')
-      .replace(/[^0-9a-zA-Z가-힣]/g, '')
-      .replace(/\s+/g, '')
-      .toLowerCase();
-  }
-
-  private compactKoreanSpacing(value: string) {
-    return value;
-  }
-
-  private shouldSuppressLine(line: string, lastUserMessage: string | null) {
-    const trimmed = line.trim();
-    if (!trimmed) return true;
-    if (/^\[[^\]]+\]\s*>\s*$/.test(trimmed)) return true;
-    if (/^Model:\s+/i.test(trimmed)) return true;
-    if (/^▸\s*Time:/i.test(trimmed)) return true;
-    if (lastUserMessage) {
-      const normalizedUser = this.normalizeForEcho(lastUserMessage.trim());
-      const normalizedLine = this.normalizeForEcho(trimmed);
-      if (normalizedLine === normalizedUser) return true;
-      const stripped = this.stripPrompt(trimmed).trim();
-      if (this.normalizeForEcho(stripped) === normalizedUser) return true;
-      if (normalizedLine.length > 0 && normalizedLine.length <= normalizedUser.length + 1) {
-        if (normalizedLine.includes(normalizedUser)) return true;
-      }
-    }
-    return false;
   }
 
   async getAuthStatus(): Promise<{ loggedIn: boolean; user: string | null; raw: string }> {
@@ -284,18 +201,110 @@ export class KiroCliManager {
     });
   }
 
-  private ensureSession(
+  private cleanLine(line: string, session: KiroSession): string | null {
+    const cleaned = line
+      .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
+      .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
+      .replace(/\x1b\[\?[0-9]+[hl]/g, '')
+      .replace(/\x1b\[[0-9;]*m/g, '')
+      .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
+      .replace(/\[0m/g, '')
+      .replace(/\[38;5;\d+m/g, '')
+      .replace(/\[1m/g, '')
+      .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏▸]/g, '')
+      .trim();
+    
+    console.log('[KiroCliManager] Cleaned:', cleaned.substring(0, 100));
+    
+    if (!cleaned) return null;
+    
+    if (!session.ready && /^Model:/.test(cleaned)) {
+      session.ready = true;
+      console.log('[KiroCliManager] Session ready (Model detected)');
+      
+      if (session.onReady) {
+        session.onReady();
+      }
+      
+      if (session.pendingMessage && session.stdin) {
+        console.log('[KiroCliManager] Sending pending message:', session.pendingMessage);
+        session.stdin.write(session.pendingMessage + '\r');
+        session.pendingMessage = undefined;
+      }
+      return null;
+    }
+    
+    if (/^\[.*\]\s*\d+%\s*>/.test(cleaned)) {
+      console.log('[KiroCliManager] Prompt line, skipping');
+      if (session.responseStarted) {
+        session.responseStarted = false;
+      }
+      return null;
+    }
+    
+    // "Time:" 앞에 있는 실제 응답 추출
+    const timeMatch = cleaned.match(/^(.+?)\s*Time:\s*\d+s/);
+    if (timeMatch) {
+      const response = timeMatch[1].trim();
+      console.log('[KiroCliManager] Extracted response before Time:', response);
+      console.log('[KiroCliManager] Response hex:', Buffer.from(response, 'utf8').toString('hex'));
+      session.responseStarted = false;
+      if (response && response.length > 0) {
+        return response;
+      }
+      return null;
+    }
+    
+    if (!session.responseStarted) {
+      console.log('[KiroCliManager] Not started, checking:', cleaned.substring(0, 50));
+      if (/^[╭╰│═─┌┐└┘├┤┬┴┼⠀]/.test(cleaned)) return null;
+      if (/Did you know\?/.test(cleaned)) return null;
+      if (/Welcome to Kiro/i.test(cleaned)) return null;
+      if (/Run \/prompts/i.test(cleaned)) return null;
+      if (/Use \/tangent/i.test(cleaned)) return null;
+      if (/enable custom tools with MCP/i.test(cleaned)) return null;
+      if (/You can (use|see)/i.test(cleaned)) return null;
+      if (/Use shift \+ tab/i.test(cleaned)) return null;
+      if (/^💡/.test(cleaned)) return null;
+      if (/^🔧/.test(cleaned)) return null;
+      if (/^Model:/.test(cleaned)) return null;
+      if (/Thinking\.\.\./.test(cleaned)) return null;
+      if (/^Time:/.test(cleaned)) return null;
+      
+      if (cleaned.length > 5 && /^>/.test(cleaned)) {
+        console.log('[KiroCliManager] Response starting!');
+        session.responseStarted = true;
+        return cleaned.substring(1).trim();
+      }
+      
+      return null;
+    }
+    
+    if (/Thinking\.\.\./.test(cleaned)) return null;
+    if (/^Time:/.test(cleaned)) {
+      console.log('[KiroCliManager] Response ended');
+      session.responseStarted = false;
+      return null;
+    }
+    
+    return cleaned;
+  }
+
+  initSession(
     projectId: string,
-    projectPath: string,
-    agent: string,
-    callbacks: SessionCallbacks
-  ): KiroSession {
+    options: KiroCliOptions,
+    onReady: () => void,
+    onData: (data: string) => void,
+    onError: (error: string) => void
+  ): void {
     const existing = this.sessions.get(projectId);
     if (existing) {
-      existing.projectPath = projectPath;
-      existing.agent = agent;
-      existing.callbacks = callbacks;
-      return existing;
+      if (existing.ready) {
+        onReady();
+      } else {
+        existing.onReady = onReady;
+      }
+      return;
     }
 
     const isWindows = process.platform === 'win32';
@@ -303,123 +312,237 @@ export class KiroCliManager {
     let args: string[];
 
     if (isWindows) {
-      const wslPath = projectPath.replace(/\\/g, '/').replace(/^([A-Z]):/, (match, drive) =>
-        `/mnt/${drive.toLowerCase()}`
-      );
-      const kiroCliPath = '/home/blake/.local/bin/kiro-cli';
+      const kiroCliPath = this.getWslKiroPath();
+      const wslPath = options.projectPath.replace(/\\/g, '/').replace(/^([A-Z]):/, (_, d) => `/mnt/${d.toLowerCase()}`);
       command = 'wsl';
-      args = ['-e', 'bash', '-c', `export LANG=C.UTF-8 && cd "${wslPath}" && ${kiroCliPath} chat --agent ${agent}`];
+      args = ['--', 'bash', '-c', `export LANG=en_US.UTF-8 && cd "${wslPath}" && ${kiroCliPath} chat --agent ${options.agent}`];
+      console.log('[KiroCliManager] Command:', command, args);
     } else {
       const kiroPath = this.resolveKiroCliPath();
-      command = '/bin/zsh';
-      args = ['-lc', `export LANG=C.UTF-8; stty -echo; exec "${kiroPath}" chat --agent "${agent}"`];
+      command = '/bin/bash';
+      args = ['-c', `${kiroPath} chat --agent ${options.agent}`];
     }
 
-    const homeDir = process.env.HOME || os.homedir();
-    const proc = pty.spawn(command, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 40,
-      cwd: isWindows ? undefined : projectPath,
-      env: {
-        ...process.env,
-        LANG: 'C.UTF-8',
-        TERM: 'xterm-256color',
-        PATH: `${process.env.PATH || ''}:${homeDir}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin`
-      }
-    });
+    console.log('[KiroCliManager] Creating new session');
+
+    let proc: any;
+    let stdinWriter: any;
+    
+    if (isWindows) {
+      // Windows에서는 node-pty 사용 (ConPTY로 UTF-8 처리)
+      const pty = require('node-pty');
+      proc = pty.spawn('C:\\Windows\\System32\\wsl.exe', args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        cwd: undefined,
+        env: {
+          ...process.env,
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8'
+        }
+      });
+      stdinWriter = proc; // node-pty는 proc.write() 사용
+    } else {
+      proc = spawn(command, args, {
+        cwd: options.projectPath,
+        env: {
+          ...process.env,
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8'
+        }
+      });
+      stdinWriter = proc.stdin;
+    }
+
+    console.log('[KiroCliManager] Process spawned, PID:', proc.pid);
 
     const session: KiroSession = {
       proc,
       projectId,
-      projectPath,
-      agent,
-      callbacks,
-      lastUserMessage: null,
-      ttyLine: [],
-      ttyCursor: 0,
-      waitForPrompt: true,
-      echoPending: false
+      buffer: '',
+      callbacks: { onData, onError },
+      stdin: stdinWriter,
+      responseStarted: false,
+      ready: false,
+      onReady
     };
-    let outputReady = false;
 
     this.sessions.set(projectId, session);
 
-    const handleOutput = (data: string) => {
-      const cleaned = this.renderTtyChunk(session, this.normalizeOutput(this.stripAnsi(data.toString())));
-      if (!cleaned) return;
-      const rawLines = cleaned.split('\n');
-      const filteredLines = rawLines
-        .map((line) => this.stripInlineThinking(line))
-        .map((line) => this.compactKoreanSpacing(line))
-        .filter((line) => {
-          if (this.isSpinnerOnly(line)) return false;
-          if (this.isBannerLine(line)) return false;
-          if (session.waitForPrompt) {
-            if (/\[[^\]]+\]\s*>\s*/.test(line)) {
-              session.waitForPrompt = false;
-              return false;
-            }
-            if (line.trim().length > 0 && !this.isSpinnerOnly(line) && !this.isBannerLine(line)) {
-              // Some kiro-cli builds don't emit a prompt line; unlock on first real content.
-              session.waitForPrompt = false;
-            } else {
-              return false;
-            }
-          }
-          line = this.stripPrompt(line);
-          line = line.replace(/^[> ]+/, '').trim();
-          if (session.echoPending && session.lastUserMessage) {
-            const normalizedUser = this.normalizeForEcho(session.lastUserMessage);
-            const normalizedLine = this.normalizeForEcho(line);
-            if (normalizedLine.includes(normalizedUser)) {
-              session.echoPending = false;
-              return false;
-            }
-          }
-          return !this.shouldSuppressLine(line, session.lastUserMessage);
-        });
-      const merged = filteredLines.join('\n');
-      if (merged.trim().length > 0) {
-        callbacks.onData(merged + '\n');
+    // 30초 타임아웃
+    const timeout = setTimeout(() => {
+      if (!session.ready) {
+        console.error('[KiroCliManager] Session timeout for', projectId);
+        onError('Session initialization timeout. Please try again.');
+        this.sessions.delete(projectId);
+        proc.kill();
       }
+    }, 30000);
+
+    const processData = (data: string) => {
+      session.buffer += data;
+      
+      if (session.flushTimer) {
+        clearTimeout(session.flushTimer);
+      }
+      
+      // Time: 패턴이 나오면 즉시 처리
+      if (session.buffer.includes('Time:') && session.buffer.match(/Time:\s*\d+s/)) {
+        const fullBuffer = session.buffer;
+        session.buffer = '';
+        
+        console.log('[KiroCliManager] Response complete, responseStarted was:', session.responseStarted);
+        
+        // 마지막 Thinking... 이후, Time: 이전의 실제 응답 추출
+        const parts = fullBuffer.split(/Thinking\.\.\./);
+        const lastPart = parts[parts.length - 1]; // 마지막 Thinking... 이후
+        
+        const responseMatch = lastPart.match(/([\s\S]*?)Time:/);
+        if (responseMatch) {
+          let response = responseMatch[1];
+          
+          // ANSI 제어 문자 제거
+          response = response
+            .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
+            .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
+            .replace(/\x1b\[\?[0-9]+[hl]/g, '')
+            .replace(/\x1b\[[0-9;]*m/g, '')
+            .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
+            .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏▸]/g, '')
+            .replace(/^\s*>\s*/, '')
+            .trim();
+          
+          console.log('[KiroCliManager] Extracted response:', response.substring(0, 100));
+          
+          if (response && response.length > 0) {
+            onData(response + '\n');
+          }
+        }
+        
+        session.responseStarted = false;
+        return;
+      }
+      
+      // Time: 패턴이 나올 때까지는 라인 처리하지 않음 (Thinking 스피너 방지)
+      if (session.responseStarted) {
+        console.log('[KiroCliManager] Skipping line processing (responseStarted=true)');
+        return;
+      }
+      
+      if (session.buffer.includes('\n')) {
+        const lines = session.buffer.split('\n');
+        session.buffer = lines.pop() || '';
+        
+        console.log('[KiroCliManager] Processing', lines.length, 'lines (responseStarted=false)');
+        
+        for (const line of lines) {
+          const cleaned = this.cleanLine(line, session);
+          if (cleaned) {
+            console.log('[KiroCliManager] Sending line to UI:', cleaned.substring(0, 50));
+            onData(cleaned + '\n');
+          }
+        }
+      }
+      
+      session.flushTimer = setTimeout(() => {
+        if (session.buffer.trim() && !session.responseStarted) {
+          const cleaned = this.cleanLine(session.buffer, session);
+          if (cleaned) {
+            onData(cleaned + '\n');
+          }
+          session.buffer = '';
+        }
+      }, 100);
     };
 
-    proc.onData(handleOutput);
-
-    proc.onExit((event: { exitCode: number; signal?: number }) => {
-      this.sessions.delete(projectId);
-      if (event.exitCode !== 0) {
-        callbacks.onError(`Terminal exited with code ${event.exitCode}`);
+    if (isWindows) {
+      // node-pty는 onData 이벤트 사용
+      proc.onData(processData);
+      
+      proc.onExit((event: { exitCode: number; signal?: number }) => {
+        console.log('[KiroCliManager] Process closed:', event.exitCode);
+        clearTimeout(timeout);
+        this.sessions.delete(projectId);
+      });
+    } else {
+      if (proc.stdout) {
+        proc.stdout.setEncoding('utf8');
+        proc.stdout.on('data', (data: Buffer | string) => {
+          const text = Buffer.isBuffer(data) ? data.toString('utf8') : data;
+          console.log('[KiroCliManager] stdout:', text.substring(0, 100));
+          processData(text);
+        });
       }
-    });
 
-    if (typeof (proc as any).on === 'function') {
-      (proc as any).on('error', (err: any) => {
-        callbacks.onError(`Failed to start kiro-cli: ${err.message}`);
+      if (proc.stderr) {
+        proc.stderr.setEncoding('utf8');
+        proc.stderr.on('data', (data: Buffer | string) => {
+          const text = Buffer.isBuffer(data) ? data.toString('utf8') : data;
+          console.log('[KiroCliManager] stderr:', text.substring(0, 100));
+          processData(text);
+        });
+      }
+
+      proc.on('error', (err: any) => {
+        console.error('[KiroCliManager] Process error:', err);
+        onError(`Failed to execute: ${err.message}`);
+        this.sessions.delete(projectId);
+      });
+
+      proc.on('close', (code: number | null) => {
+        console.log('[KiroCliManager] Process closed:', code);
+        clearTimeout(timeout);
         this.sessions.delete(projectId);
       });
     }
-
-    return session;
   }
 
   executeCommand(projectId: string, options: KiroCliOptions, onData: (data: string) => void, onError: (error: string) => void): void {
-    const session = this.ensureSession(projectId, options.projectPath, options.agent, { onData, onError });
-    session.lastUserMessage = options.message;
-    session.echoPending = true;
-    session.proc.write(`${options.message}\r`);
+    const session = this.sessions.get(projectId);
+    
+    if (!session) {
+      onError('Session not initialized. Call initSession first.');
+      return;
+    }
+
+    if (!session.ready) {
+      session.pendingMessage = options.message;
+      return;
+    }
+
+    if (session.stdin) {
+      const message = options.message;
+      console.log('[KiroCliManager] Setting responseStarted = true');
+      session.responseStarted = true;
+      
+      if (typeof session.stdin.write === 'function') {
+        session.stdin.write(message + '\r');
+      } else {
+        onError('Session stdin not writable');
+      }
+    } else {
+      onError('Session stdin not available');
+    }
   }
 
   stopCommand(projectId?: string): void {
     if (projectId) {
       const session = this.sessions.get(projectId);
       if (session) {
+        if (session.flushTimer) {
+          clearTimeout(session.flushTimer);
+        }
         session.proc.kill();
         this.sessions.delete(projectId);
       }
     } else {
-      this.sessions.forEach((session) => session.proc.kill());
+      this.sessions.forEach((session) => {
+        if (session.flushTimer) {
+          clearTimeout(session.flushTimer);
+        }
+        session.proc.kill();
+      });
       this.sessions.clear();
     }
   }
