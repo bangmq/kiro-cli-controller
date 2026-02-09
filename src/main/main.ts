@@ -211,6 +211,9 @@ function setupIpcHandlers() {
         (error) => {
           console.log(`[Main] Error for ${projectId}:`, error);
           event.sender.send('cli-error', projectId, error);
+        },
+        () => {
+          event.sender.send('cli-done', projectId);
         }
       );
     } catch (error: any) {

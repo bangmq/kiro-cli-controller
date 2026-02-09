@@ -95,8 +95,6 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
           return [...prev, { role: 'assistant', content: data }];
         });
       }
-      
-      setLoading(projectId, false);
     };
 
     const handleError = (projectId: string, error: string) => {
@@ -111,9 +109,15 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
       setLoading(projectId, false);
     };
 
+    const handleDone = (projectId: string) => {
+      console.log(`[Renderer] Received done for ${projectId}`);
+      setLoading(projectId, false);
+    };
+
     console.log(`[Renderer] Setting up listeners (once)`);
     window.electronAPI.onCliOutput(handleOutput);
     window.electronAPI.onCliError(handleError);
+    window.electronAPI.onCliDone(handleDone);
   }, []);
 
   useEffect(() => {

@@ -8,6 +8,7 @@ export interface ElectronAPI {
   stopCommand: () => Promise<void>;
   onCliOutput: (callback: (projectId: string, data: string) => void) => void;
   onCliError: (callback: (projectId: string, error: string) => void) => void;
+  onCliDone: (callback: (projectId: string) => void) => void;
   windowMinimize: () => Promise<void>;
   windowMaximize: () => Promise<void>;
   windowClose: () => Promise<void>;

@@ -12,6 +12,7 @@ export interface KiroCliOptions {
 interface SessionCallbacks {
   onData: (data: string) => void;
   onError: (error: string) => void;
+  onDone?: () => void;
 }
 
 interface KiroSession {
@@ -21,9 +22,16 @@ interface KiroSession {
   callbacks: SessionCallbacks;
   stdin: any;
   flushTimer?: NodeJS.Timeout;
+  responseIdleTimer?: NodeJS.Timeout;
+  responseStartTimer?: NodeJS.Timeout;
   responseStarted: boolean;
+  awaitingResponse: boolean;
+  endAfterLine: boolean;
+  responseEmitted: boolean;
+  responseAccumulator?: string;
   ready: boolean;
   pendingMessage?: string;
+  lastMessage?: string;
   onReady?: () => void;
 }
 
@@ -217,8 +225,61 @@ export class KiroCliManager {
     console.log('[KiroCliManager] Cleaned:', cleaned.substring(0, 100));
     
     if (!cleaned) return null;
+
+    // line 내부에 섞인 Thinking... 제거 및 선행 프롬프트 기호 제거
+    let normalizedLine = cleaned;
+
+    // "Thinking...> 실제응답" 형태 처리
+    if (/Thinking\.\.\./.test(normalizedLine) && normalizedLine.includes('>')) {
+      const after = normalizedLine.split('>').pop() || '';
+      normalizedLine = after;
+    }
+
+    normalizedLine = normalizedLine.replace(/Thinking\.\.\./g, '').trim();
+    if (normalizedLine.startsWith('>')) {
+      normalizedLine = normalizedLine.slice(1).trim();
+    }
+    if (!normalizedLine) return null;
+
+    const normalizeForEcho = (text: string) =>
+      text
+        .replace(/[\s\u0000-\u001f\u007f]/g, '')
+        .replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, '')
+        .toLowerCase();
+
+    // CLI 에코/프롬프트 라인(예: "[agent] > ...")
+    if (/^\[[^\]]+\]\s*>\s*/.test(normalizedLine)) {
+      const promptContent = normalizedLine.replace(/^\[[^\]]+\]\s*>\s*/, '').trim();
+      // 사용자가 보낸 메시지 에코라면 응답 진행 상태는 유지
+      if (session.lastMessage) {
+        const last = session.lastMessage.trim();
+        const lastNorm = normalizeForEcho(last);
+        const promptNorm = normalizeForEcho(promptContent);
+        if (
+          promptContent === last ||
+          last.startsWith(promptContent) ||
+          promptContent.startsWith(last) ||
+          (lastNorm && promptNorm && (lastNorm.startsWith(promptNorm) || promptNorm.startsWith(lastNorm))) ||
+          (lastNorm && promptNorm && (lastNorm.includes(promptNorm) || promptNorm.includes(lastNorm)))
+        ) {
+          return null;
+        }
+      }
+      // 대화 중이 아닐 때의 프롬프트는 UI에 표시하지 않음
+      if (!session.awaitingResponse && !session.responseStarted) {
+        return null;
+      }
+      // 이미 응답을 출력했다면 프롬프트는 종료 신호로만 처리
+      if (session.responseEmitted) {
+        this.finishResponse(session);
+        return null;
+      }
+      // 에코가 아니라면 프롬프트/응답 라인으로 간주 (표시 후 종료)
+      session.endAfterLine = true;
+      return promptContent || null;
+    }
     
-    if (!session.ready && /^Model:/.test(cleaned)) {
+    if (!session.ready && /^Model:/.test(normalizedLine)) {
       session.ready = true;
       console.log('[KiroCliManager] Session ready (Model detected)');
       
@@ -234,21 +295,19 @@ export class KiroCliManager {
       return null;
     }
     
-    if (/^\[.*\]\s*\d+%\s*>/.test(cleaned)) {
+    if (/^\[.*\]\s*\d+%\s*>/.test(normalizedLine)) {
       console.log('[KiroCliManager] Prompt line, skipping');
-      if (session.responseStarted) {
-        session.responseStarted = false;
-      }
+      this.finishResponse(session);
       return null;
     }
     
     // "Time:" 앞에 있는 실제 응답 추출
-    const timeMatch = cleaned.match(/^(.+?)\s*Time:\s*\d+s/);
+    const timeMatch = normalizedLine.match(/^(.+?)\s*Time:\s*\d+s/);
     if (timeMatch) {
       const response = timeMatch[1].trim();
       console.log('[KiroCliManager] Extracted response before Time:', response);
       console.log('[KiroCliManager] Response hex:', Buffer.from(response, 'utf8').toString('hex'));
-      session.responseStarted = false;
+      this.finishResponse(session);
       if (response && response.length > 0) {
         return response;
       }
@@ -256,38 +315,52 @@ export class KiroCliManager {
     }
     
     if (!session.responseStarted) {
-      console.log('[KiroCliManager] Not started, checking:', cleaned.substring(0, 50));
-      if (/^[╭╰│═─┌┐└┘├┤┬┴┼⠀]/.test(cleaned)) return null;
-      if (/Did you know\?/.test(cleaned)) return null;
-      if (/Welcome to Kiro/i.test(cleaned)) return null;
-      if (/Run \/prompts/i.test(cleaned)) return null;
-      if (/Use \/tangent/i.test(cleaned)) return null;
-      if (/enable custom tools with MCP/i.test(cleaned)) return null;
-      if (/You can (use|see)/i.test(cleaned)) return null;
-      if (/Use shift \+ tab/i.test(cleaned)) return null;
-      if (/^💡/.test(cleaned)) return null;
-      if (/^🔧/.test(cleaned)) return null;
-      if (/^Model:/.test(cleaned)) return null;
-      if (/Thinking\.\.\./.test(cleaned)) return null;
-      if (/^Time:/.test(cleaned)) return null;
-      
-      if (cleaned.length > 5 && /^>/.test(cleaned)) {
+      console.log('[KiroCliManager] Not started, checking:', normalizedLine.substring(0, 50));
+      if (/^[╭╰│═─┌┐└┘├┤┬┴┼⠀]/.test(normalizedLine)) return null;
+      if (/Did you know\?/.test(normalizedLine)) return null;
+      if (/Welcome to Kiro/i.test(normalizedLine)) return null;
+      if (/Run \/prompts/i.test(normalizedLine)) return null;
+      if (/Use \/tangent/i.test(normalizedLine)) return null;
+      if (/enable custom tools with MCP/i.test(normalizedLine)) return null;
+      if (/You can (use|see)/i.test(normalizedLine)) return null;
+      if (/Use shift \+ tab/i.test(normalizedLine)) return null;
+      if (/^💡/.test(normalizedLine)) return null;
+      if (/^🔧/.test(normalizedLine)) return null;
+      if (/^Model:/.test(normalizedLine)) return null;
+      if (/^Time:/.test(normalizedLine)) return null;
+
+      // 응답 대기 중이면, 프롬프트가 아니고 무시 목록도 아닌 첫 라인을 응답 시작으로 간주
+      if (session.awaitingResponse) {
+        console.log('[KiroCliManager] Response starting (awaitingResponse)');
+        session.responseStarted = true;
+        return normalizedLine;
+      }
+
+      if (normalizedLine.length > 5 && /^>/.test(normalizedLine)) {
         console.log('[KiroCliManager] Response starting!');
         session.responseStarted = true;
-        return cleaned.substring(1).trim();
+        return normalizedLine.substring(1).trim();
       }
-      
+
       return null;
     }
     
-    if (/Thinking\.\.\./.test(cleaned)) return null;
-    if (/^Time:/.test(cleaned)) {
+    // 에코 조각은 응답 중에도 숨김 (예: "녕")
+    if (session.lastMessage && !session.responseEmitted) {
+      const lastNorm = normalizeForEcho(session.lastMessage);
+      const lineNorm = normalizeForEcho(normalizedLine);
+      if (lineNorm && lastNorm && (lastNorm.startsWith(lineNorm) || lastNorm.includes(lineNorm)) && lineNorm.length <= lastNorm.length) {
+        return null;
+      }
+    }
+
+    if (/^Time:/.test(normalizedLine)) {
       console.log('[KiroCliManager] Response ended');
-      session.responseStarted = false;
+      this.finishResponse(session);
       return null;
     }
     
-    return cleaned;
+    return normalizedLine;
   }
 
   initSession(
@@ -295,7 +368,8 @@ export class KiroCliManager {
     options: KiroCliOptions,
     onReady: () => void,
     onData: (data: string) => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    onDone?: () => void
   ): void {
     const existing = this.sessions.get(projectId);
     if (existing) {
@@ -319,8 +393,8 @@ export class KiroCliManager {
       console.log('[KiroCliManager] Command:', command, args);
     } else {
       const kiroPath = this.resolveKiroCliPath();
-      command = '/bin/bash';
-      args = ['-c', `${kiroPath} chat --agent ${options.agent}`];
+      command = kiroPath;
+      args = ['chat', '--agent', options.agent];
     }
 
     console.log('[KiroCliManager] Creating new session');
@@ -344,7 +418,12 @@ export class KiroCliManager {
       });
       stdinWriter = proc; // node-pty는 proc.write() 사용
     } else {
-      proc = spawn(command, args, {
+      // macOS/Linux에서도 PTY를 사용해야 CLI가 응답을 flush하는 경우가 많음
+      const pty = require('node-pty');
+      proc = pty.spawn(command, args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
         cwd: options.projectPath,
         env: {
           ...process.env,
@@ -352,7 +431,7 @@ export class KiroCliManager {
           LC_ALL: 'C.UTF-8'
         }
       });
-      stdinWriter = proc.stdin;
+      stdinWriter = proc; // node-pty는 proc.write() 사용
     }
 
     console.log('[KiroCliManager] Process spawned, PID:', proc.pid);
@@ -361,10 +440,14 @@ export class KiroCliManager {
       proc,
       projectId,
       buffer: '',
-      callbacks: { onData, onError },
+      callbacks: { onData, onError, onDone },
       stdin: stdinWriter,
       responseStarted: false,
       ready: false,
+      awaitingResponse: false,
+      endAfterLine: false,
+      responseEmitted: false,
+      lastMessage: undefined,
       onReady
     };
 
@@ -381,79 +464,183 @@ export class KiroCliManager {
     }, 30000);
 
     const processData = (data: string) => {
-      session.buffer += data;
+      const normalized = data.replace(/\r/g, '\n');
+      const rawPreview = data
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .slice(0, 300);
+      console.log('[KiroCliManager] Raw chunk:', rawPreview);
+      session.buffer += normalized;
       
       if (session.flushTimer) {
         clearTimeout(session.flushTimer);
       }
-      
-      // Time: 패턴이 나오면 즉시 처리
-      if (session.buffer.includes('Time:') && session.buffer.match(/Time:\s*\d+s/)) {
-        const fullBuffer = session.buffer;
-        session.buffer = '';
-        
-        console.log('[KiroCliManager] Response complete, responseStarted was:', session.responseStarted);
-        
-        // 마지막 Thinking... 이후, Time: 이전의 실제 응답 추출
-        const parts = fullBuffer.split(/Thinking\.\.\./);
-        const lastPart = parts[parts.length - 1]; // 마지막 Thinking... 이후
-        
-        const responseMatch = lastPart.match(/([\s\S]*?)Time:/);
-        if (responseMatch) {
-          let response = responseMatch[1];
-          
-          // ANSI 제어 문자 제거
-          response = response
-            .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
-            .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
-            .replace(/\x1b\[\?[0-9]+[hl]/g, '')
-            .replace(/\x1b\[[0-9;]*m/g, '')
-            .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
-            .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏▸]/g, '')
-            .replace(/^\s*>\s*/, '')
-            .trim();
-          
-          console.log('[KiroCliManager] Extracted response:', response.substring(0, 100));
-          
-          if (response && response.length > 0) {
-            onData(response + '\n');
-          }
+
+      if (session.responseIdleTimer) {
+        clearTimeout(session.responseIdleTimer);
+      }
+
+      const stripAnsi = (text: string) =>
+        text
+          .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
+          .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
+          .replace(/\x1b\[\?[0-9]+[hl]/g, '')
+          .replace(/\x1b\[[0-9;]*m/g, '')
+          .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '');
+
+      const normalizeForEcho = (text: string) =>
+        text
+          .replace(/[\s\u0000-\u001f\u007f]/g, '')
+          .replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, '')
+          .toLowerCase();
+
+      const sanitizeResponseChunk = (text: string): string => {
+        let t = stripAnsi(text).replace(/\r/g, '');
+        if (!t) return '';
+        // spinner/Thinking 제거
+        t = t.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏▸]/g, '');
+        if (/Thinking\.\.\./.test(t) && t.includes('>')) {
+          t = t.split('>').pop() || '';
         }
-        
-        session.responseStarted = false;
-        return;
-      }
-      
-      // Time: 패턴이 나올 때까지는 라인 처리하지 않음 (Thinking 스피너 방지)
+        t = t.replace(/Thinking\.\.\./g, '');
+
+        // 프롬프트/에코 제거
+        if (/\[[^\]]+\]\s*>\s*/.test(t)) {
+          const content = t.replace(/^\s*\[[^\]]+\]\s*>\s*/, '').trim();
+          const last = session.lastMessage ? session.lastMessage.trim() : '';
+          const lastNorm = normalizeForEcho(last);
+          const contentNorm = normalizeForEcho(content);
+          const isEcho =
+            last &&
+            (content === last ||
+              last.startsWith(content) ||
+              content.startsWith(last) ||
+              (lastNorm && contentNorm && (lastNorm.startsWith(contentNorm) || contentNorm.startsWith(lastNorm))) ||
+              (lastNorm && contentNorm && (lastNorm.includes(contentNorm) || contentNorm.includes(lastNorm))));
+          if (isEcho) return '';
+          return content;
+        }
+
+        return t;
+      };
+
+      // 응답 중이면 raw chunk 기반으로 누적 (줄바꿈 없이 한 글자씩 오는 경우 대응)
       if (session.responseStarted) {
-        console.log('[KiroCliManager] Skipping line processing (responseStarted=true)');
+        const rawText = sanitizeResponseChunk(data);
+        if (/Time:\s*\d+s/.test(rawText)) {
+          const before = rawText.split(/Time:\s*\d+s/)[0] || '';
+          if (before.trim()) {
+            session.responseEmitted = true;
+            session.responseAccumulator = (session.responseAccumulator || '') + before;
+          }
+          this.finishResponse(session);
+          return;
+        }
+        if (rawText) {
+          session.responseEmitted = true;
+          session.responseAccumulator = (session.responseAccumulator || '') + rawText;
+        }
+
+        if (session.responseStarted) {
+          session.responseIdleTimer = setTimeout(() => {
+            this.finishResponse(session);
+          }, 800);
+        }
         return;
       }
       
+      // Time: 패턴이 포함된 경우, Time: 이전 내용을 안전하게 추출
+      if (session.buffer.includes('Time:')) {
+        const idx = session.buffer.indexOf('Time:');
+        const before = session.buffer.slice(0, idx);
+        const after = session.buffer.slice(idx);
+
+        // before에서 실제 응답을 추출 (ANSI 제거 + Thinking 제거)
+        let cleanedBefore = before
+          .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
+          .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
+          .replace(/\x1b\[\?[0-9]+[hl]/g, '')
+          .replace(/\x1b\[[0-9;]*m/g, '')
+          .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
+          .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏▸]/g, '')
+          .replace(/Thinking\.\.\./g, '')
+          .trim();
+
+        // 프롬프트 형태는 제거
+        if (/^\[[^\]]+\]\s*>\s*/.test(cleanedBefore)) {
+          const promptContent = cleanedBefore.replace(/^\[[^\]]+\]\s*>\s*/, '').trim();
+          const last = session.lastMessage ? session.lastMessage.trim() : '';
+          const normalize = (text: string) =>
+            text
+              .replace(/[\s\u0000-\u001f\u007f]/g, '')
+              .replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, '')
+              .toLowerCase();
+          const lastNorm = normalize(last);
+          const promptNorm = normalize(promptContent);
+          const isEcho =
+            last &&
+            (promptContent === last ||
+              last.startsWith(promptContent) ||
+              promptContent.startsWith(last) ||
+              (lastNorm && promptNorm && (lastNorm.startsWith(promptNorm) || promptNorm.startsWith(lastNorm))) ||
+              (lastNorm && promptNorm && (lastNorm.includes(promptNorm) || promptNorm.includes(lastNorm))));
+
+          cleanedBefore = isEcho ? '' : promptContent;
+        }
+
+        if (cleanedBefore) {
+          session.responseEmitted = true;
+          session.responseAccumulator = (session.responseAccumulator || '') + cleanedBefore;
+        }
+
+        // Time: 이후는 버퍼에 남기고, 응답 종료 처리
+        session.buffer = after;
+        this.finishResponse(session);
+        return;
+      }
+
       if (session.buffer.includes('\n')) {
         const lines = session.buffer.split('\n');
         session.buffer = lines.pop() || '';
         
-        console.log('[KiroCliManager] Processing', lines.length, 'lines (responseStarted=false)');
+        console.log('[KiroCliManager] Processing', lines.length, 'lines (responseStarted=' + session.responseStarted + ')');
         
         for (const line of lines) {
           const cleaned = this.cleanLine(line, session);
           if (cleaned) {
             console.log('[KiroCliManager] Sending line to UI:', cleaned.substring(0, 50));
-            onData(cleaned + '\n');
+            session.responseEmitted = true;
+            session.responseAccumulator = (session.responseAccumulator || '') + cleaned;
+            if (session.endAfterLine) {
+              session.endAfterLine = false;
+              this.finishResponse(session);
+            }
           }
         }
       }
       
       session.flushTimer = setTimeout(() => {
-        if (session.buffer.trim() && !session.responseStarted) {
+        if (session.buffer.trim()) {
           const cleaned = this.cleanLine(session.buffer, session);
           if (cleaned) {
-            onData(cleaned + '\n');
+            session.responseEmitted = true;
+            session.responseAccumulator = (session.responseAccumulator || '') + cleaned;
+            if (session.endAfterLine) {
+              session.endAfterLine = false;
+              this.finishResponse(session);
+            }
           }
           session.buffer = '';
         }
       }, 100);
+
+      // 응답 도중 추가 출력이 멈췄다면 자동 종료
+      if (session.responseStarted) {
+        session.responseIdleTimer = setTimeout(() => {
+          this.finishResponse(session);
+        }, 800);
+      }
     };
 
     if (isWindows) {
@@ -466,39 +653,24 @@ export class KiroCliManager {
         this.sessions.delete(projectId);
       });
     } else {
-      if (proc.stdout) {
-        proc.stdout.setEncoding('utf8');
-        proc.stdout.on('data', (data: Buffer | string) => {
-          const text = Buffer.isBuffer(data) ? data.toString('utf8') : data;
-          console.log('[KiroCliManager] stdout:', text.substring(0, 100));
-          processData(text);
-        });
-      }
-
-      if (proc.stderr) {
-        proc.stderr.setEncoding('utf8');
-        proc.stderr.on('data', (data: Buffer | string) => {
-          const text = Buffer.isBuffer(data) ? data.toString('utf8') : data;
-          console.log('[KiroCliManager] stderr:', text.substring(0, 100));
-          processData(text);
-        });
-      }
-
-      proc.on('error', (err: any) => {
-        console.error('[KiroCliManager] Process error:', err);
-        onError(`Failed to execute: ${err.message}`);
-        this.sessions.delete(projectId);
-      });
-
-      proc.on('close', (code: number | null) => {
-        console.log('[KiroCliManager] Process closed:', code);
+      // node-pty는 onData 이벤트 사용
+      proc.onData(processData);
+      
+      proc.onExit((event: { exitCode: number; signal?: number }) => {
+        console.log('[KiroCliManager] Process closed:', event.exitCode);
         clearTimeout(timeout);
         this.sessions.delete(projectId);
       });
     }
   }
 
-  executeCommand(projectId: string, options: KiroCliOptions, onData: (data: string) => void, onError: (error: string) => void): void {
+  executeCommand(
+    projectId: string,
+    options: KiroCliOptions,
+    onData: (data: string) => void,
+    onError: (error: string) => void,
+    onDone?: () => void
+  ): void {
     const session = this.sessions.get(projectId);
     
     if (!session) {
@@ -515,14 +687,76 @@ export class KiroCliManager {
       const message = options.message;
       console.log('[KiroCliManager] Setting responseStarted = true');
       session.responseStarted = true;
+      session.awaitingResponse = true;
+      session.endAfterLine = false;
+      session.responseEmitted = false;
+      session.responseAccumulator = '';
+      if (session.responseIdleTimer) {
+        clearTimeout(session.responseIdleTimer);
+      }
+      if (session.responseStartTimer) {
+        clearTimeout(session.responseStartTimer);
+      }
+      session.lastMessage = message;
+      session.callbacks.onData = onData;
+      session.callbacks.onError = onError;
+      session.callbacks.onDone = onDone;
       
       if (typeof session.stdin.write === 'function') {
-        session.stdin.write(message + '\r');
+        session.stdin.write(message + '\r\n');
       } else {
         onError('Session stdin not writable');
       }
+
+      // 첫 출력이 너무 오래 없으면 응답 종료 처리 (다음 메시지 막힘 방지)
+      session.responseStartTimer = setTimeout(() => {
+        if (!session.responseEmitted && session.responseStarted) {
+          onError('No response from kiro-cli. Please try again.');
+          this.finishResponse(session);
+        }
+      }, 5000);
     } else {
       onError('Session stdin not available');
+    }
+  }
+
+  private finishResponse(session: KiroSession): void {
+    session.responseStarted = false;
+    session.awaitingResponse = false;
+    session.endAfterLine = false;
+    if (session.responseAccumulator) {
+      let output = session.responseAccumulator;
+      // ANSI 및 이상 공백 정리
+      output = output
+        .replace(/\x1b\][0-9];[^\x07]*\x07/g, '')
+        .replace(/\x1b\][0-9];[^\x1b]*\x1b\\/g, '')
+        .replace(/\x1b\[\?[0-9]+[hl]/g, '')
+        .replace(/\x1b\[[0-9;]*m/g, '')
+        .replace(/\x1b\[[0-9;]*[A-HJKSTfhilmnsu]/g, '')
+        .replace(/\r/g, '\n');
+
+      // 덮어쓰기 때문에 생긴 과도한 들여쓰기/프롬프트 표시 제거
+      output = output
+        .replace(/^\s{6,}/gm, '')
+        .replace(/\n\s*>\s*/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      if (output) {
+        session.callbacks.onData(output + '\n');
+      }
+      session.responseAccumulator = '';
+    }
+    if (session.responseIdleTimer) {
+      clearTimeout(session.responseIdleTimer);
+      session.responseIdleTimer = undefined;
+    }
+    if (session.responseStartTimer) {
+      clearTimeout(session.responseStartTimer);
+      session.responseStartTimer = undefined;
+    }
+    if (session.callbacks.onDone) {
+      session.callbacks.onDone();
     }
   }
 
