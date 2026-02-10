@@ -1,0 +1,24 @@
+로그인 메서드를 다음과 같이 수정하세요:
+
+async login(): Promise<{ success: boolean; message: string }> {
+  try {
+    const result = await this.runKiroCli(['login']);
+    const output = (result.stdout || result.stderr || '').trim();
+    
+    // 로그인 명령 실행 후 2초 대기 (브라우저 인증 완료 대기)
+    if (result.code === 0 || output.includes('successfully') || output.includes('logged in')) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const status = await this.getAuthStatus();
+      return { 
+        success: status.loggedIn, 
+        message: status.loggedIn ? 'Login successful' : output 
+      };
+    }
+    
+    return { success: false, message: output || 'Login failed' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Login failed' };
+  }
+}
+
+위치: src/main/kiroCliManager.ts 의 150-157줄
