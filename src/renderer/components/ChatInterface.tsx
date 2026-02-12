@@ -24,47 +24,15 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
   const { getConversation, setConversation, isLoading, setLoading } = useConversation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [sessionReady, setSessionReady] = useState(false);
-  const [sessionError, setSessionError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const handlersRegistered = useRef(false);
   const currentProjectId = useRef(project.id);
 
-  // 프로젝트 변경 시 세션 초기화 및 대화 내역 불러오기
   useEffect(() => {
     currentProjectId.current = project.id;
-    const savedMessages = getConversation(project.id);
-    setMessages(savedMessages);
-    
-    initializeSession();
-    
-    return () => {
-      // cleanup
-    };
+    setMessages(getConversation(project.id));
   }, [project.id]);
 
-  const initializeSession = () => {
-    setSessionReady(false);
-    setSessionError(null);
-    console.log('[ChatInterface] Initializing session for', project.id);
-    
-    window.electronAPI.initSession(project.id, project.path, project.mainAgent)
-      .then((result: any) => {
-        if (result.ready) {
-          console.log('[ChatInterface] Session ready for', project.id);
-          setSessionReady(true);
-        } else {
-          console.error('[ChatInterface] Session failed:', result.error);
-          setSessionError(result.error || 'Failed to initialize session');
-        }
-      })
-      .catch((err: any) => {
-        console.error('[ChatInterface] Session error:', err);
-        setSessionError(err.message || 'Failed to initialize session');
-      });
-  };
-
-  // 메시지 변경 시 현재 프로젝트의 대화 내역 저장
   useEffect(() => {
     setConversation(project.id, messages);
   }, [messages, project.id]);
@@ -74,9 +42,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
     if (handlersRegistered.current) return;
     handlersRegistered.current = true;
 
-    const handleOutput = (projectId: string, data: string) => {
-      console.log(`[Renderer] Received output for ${projectId}:`, data.substring(0, 50));
-      
+    window.electronAPI.onCliOutput((projectId: string, data: string) => {
       setConversation(projectId, (prev) => {
         const last = prev[prev.length - 1];
         if (last && last.role === 'assistant') {
@@ -84,8 +50,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
         }
         return [...prev, { role: 'assistant', content: data }];
       });
-      
-      // 현재 보고 있는 프로젝트면 로컬 상태도 업데이트
+
       if (projectId === currentProjectId.current) {
         setMessages(prev => {
           const last = prev[prev.length - 1];
@@ -95,29 +60,19 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
           return [...prev, { role: 'assistant', content: data }];
         });
       }
-    };
+    });
 
-    const handleError = (projectId: string, error: string) => {
-      console.log(`[Renderer] Received error for ${projectId}:`, error);
-      
+    window.electronAPI.onCliError((projectId: string, error: string) => {
       setConversation(projectId, (prev) => [...prev, { role: 'assistant', content: `Error: ${error}` }]);
-      
       if (projectId === currentProjectId.current) {
         setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error}` }]);
       }
-      
       setLoading(projectId, false);
-    };
+    });
 
-    const handleDone = (projectId: string) => {
-      console.log(`[Renderer] Received done for ${projectId}`);
+    window.electronAPI.onCliDone((projectId: string) => {
       setLoading(projectId, false);
-    };
-
-    console.log(`[Renderer] Setting up listeners (once)`);
-    window.electronAPI.onCliOutput(handleOutput);
-    window.electronAPI.onCliError(handleError);
-    window.electronAPI.onCliDone(handleDone);
+    });
   }, []);
 
   useEffect(() => {
@@ -125,16 +80,14 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || !sessionReady) return;
+    if (!input.trim()) return;
 
     const messageToSend = input;
-    const projectToSend = project.id;
-    
     setMessages(prev => [...prev, { role: 'user', content: messageToSend }]);
-    setLoading(projectToSend, true);
+    setLoading(project.id, true);
     setInput('');
-    
-    await window.electronAPI.sendMessage(projectToSend, project.path, project.mainAgent, messageToSend);
+
+    await window.electronAPI.sendMessage(project.id, project.path, project.mainAgent, messageToSend);
   };
 
   const currentIsLoading = isLoading(project.id);
@@ -144,24 +97,8 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
       <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/50 backdrop-blur">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold truncate">{project.name}</div>
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-gray-400">{project.mainAgent}</div>
-            {!sessionReady && !sessionError && <div className="text-xs text-yellow-500">Initializing...</div>}
-            {sessionError && (
-              <button 
-                onClick={initializeSession}
-                className="text-xs text-red-500 hover:text-red-400 underline"
-              >
-                Retry Connection
-              </button>
-            )}
-          </div>
+          <div className="text-xs text-gray-400">{project.mainAgent}</div>
         </div>
-        {sessionError && (
-          <div className="mt-1 text-xs text-red-400">
-            {sessionError}
-          </div>
-        )}
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, idx) => (
@@ -202,13 +139,13 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder={sessionReady ? t('typeMessage') : 'Initializing session...'}
-            disabled={currentIsLoading || !sessionReady}
+            placeholder={t('typeMessage')}
+            disabled={currentIsLoading}
             className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 transition-all"
           />
           <button 
             onClick={handleSend} 
-            disabled={currentIsLoading || !input.trim() || !sessionReady}
+            disabled={currentIsLoading || !input.trim()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
           >
             {t('send')}

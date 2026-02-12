@@ -4,8 +4,10 @@ export interface ElectronAPI {
   createProject: (name: string, path: string, type: 'maintenance' | 'new-development') => Promise<any>;
   getProjects: () => Promise<any[]>;
   deleteProject: (id: string) => Promise<void>;
+  initSession: (projectId: string, projectPath: string, agent: string) => Promise<{ ready: boolean; error?: string }>;
   sendMessage: (projectId: string, projectPath: string, agent: string, message: string) => Promise<void>;
-  stopCommand: () => Promise<void>;
+  stopCommand: (projectId?: string) => Promise<void>;
+  resetSession: (projectPath: string) => Promise<void>;
   onCliOutput: (callback: (projectId: string, data: string) => void) => void;
   onCliError: (callback: (projectId: string, error: string) => void) => void;
   onCliDone: (callback: (projectId: string) => void) => void;

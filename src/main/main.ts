@@ -135,13 +135,11 @@ async function setupWindowsJumpList() {
     description: p.path
   }));
 
-  app.setJumpList([
-    {
-      type: 'custom',
-      name: 'Recent Projects',
-      items: recentProjects
-    }
-  ]);
+  app.setJumpList([{
+    type: 'custom',
+    name: 'Recent Projects',
+    items: recentProjects
+  }]);
 }
 
 function setupIpcHandlers() {
@@ -176,49 +174,30 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('init-session', (event, projectId: string, projectPath: string, agent: string) => {
-    console.log(`[Main] Initializing session for project ${projectId}`);
-    return new Promise((resolve) => {
-      kiroCliManager.initSession(
-        projectId,
-        { projectPath, agent, message: '' },
-        () => {
-          console.log(`[Main] Session ready for ${projectId}`);
-          resolve({ ready: true });
-        },
-        (data) => {
-          event.sender.send('cli-output', projectId, data);
-        },
-        (error) => {
-          console.log(`[Main] Session error for ${projectId}:`, error);
-          event.sender.send('cli-error', projectId, error);
-          resolve({ ready: false, error });
-        }
-      );
-    });
+  // initSession은 더 이상 필요 없지만, renderer 호환성을 위해 즉시 ready 반환
+  ipcMain.handle('init-session', (_event, _projectId: string, _projectPath: string, _agent: string) => {
+    return { ready: true };
   });
 
   ipcMain.handle('send-message', (event, projectId: string, projectPath: string, agent: string, message: string) => {
     console.log(`[Main] Sending message for project ${projectId}: ${message}`);
-    try {
-      kiroCliManager.executeCommand(
-        projectId,
-        { projectPath, agent, message },
-        (data) => {
-          console.log(`[Main] Output for ${projectId}:`, data.substring(0, 100));
-          event.sender.send('cli-output', projectId, data);
-        },
-        (error) => {
-          console.log(`[Main] Error for ${projectId}:`, error);
-          event.sender.send('cli-error', projectId, error);
-        },
-        () => {
-          event.sender.send('cli-done', projectId);
-        }
-      );
-    } catch (error: any) {
-      event.sender.send('cli-error', projectId, error?.message || 'Failed to send message');
-    }
+    kiroCliManager.sendMessage(
+      projectId,
+      { projectPath, agent, message },
+      (data) => {
+        event.sender.send('cli-output', projectId, data);
+      },
+      (error) => {
+        event.sender.send('cli-error', projectId, error);
+      },
+      () => {
+        event.sender.send('cli-done', projectId);
+      }
+    );
+  });
+
+  ipcMain.handle('reset-session', (_event, projectPath: string) => {
+    kiroCliManager.resetSession(projectPath);
   });
 
   ipcMain.handle('get-project-config', async (_event, projectPath: string) => {
@@ -237,8 +216,8 @@ function setupIpcHandlers() {
     await projectConfigManager.saveMeta(projectPath, meta);
   });
 
-  ipcMain.handle('stop-command', () => {
-    kiroCliManager.stopCommand();
+  ipcMain.handle('stop-command', (_, projectId?: string) => {
+    kiroCliManager.stopCommand(projectId);
   });
 
   ipcMain.handle('get-theme', () => {

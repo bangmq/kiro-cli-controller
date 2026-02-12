@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('init-session', projectId, projectPath, agent),
   sendMessage: (projectId: string, projectPath: string, agent: string, message: string) => 
     ipcRenderer.invoke('send-message', projectId, projectPath, agent, message),
-  stopCommand: () => ipcRenderer.invoke('stop-command'),
+  stopCommand: (projectId?: string) => ipcRenderer.invoke('stop-command', projectId),
+  resetSession: (projectPath: string) => ipcRenderer.invoke('reset-session', projectPath),
   onCliOutput: (callback: (projectId: string, data: string) => void) => 
     ipcRenderer.on('cli-output', (_, projectId, data) => callback(projectId, data)),
   onCliError: (callback: (projectId: string, error: string) => void) => 
