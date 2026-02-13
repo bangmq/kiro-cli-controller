@@ -3,19 +3,21 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('select-folder'),
-  createProject: (name: string, path: string, type: 'maintenance' | 'new-development') => 
+  createProject: (name: string, path: string, type: 'maintenance' | 'new-development') =>
     ipcRenderer.invoke('create-project', name, path, type),
   getProjects: () => ipcRenderer.invoke('get-projects'),
   deleteProject: (id: string) => ipcRenderer.invoke('delete-project', id),
   initSession: (projectId: string, projectPath: string, agent: string) =>
     ipcRenderer.invoke('init-session', projectId, projectPath, agent),
-  sendMessage: (projectId: string, projectPath: string, agent: string, message: string) => 
+  sendMessage: (projectId: string, projectPath: string, agent: string, message: string) =>
     ipcRenderer.invoke('send-message', projectId, projectPath, agent, message),
   stopCommand: (projectId?: string) => ipcRenderer.invoke('stop-command', projectId),
   resetSession: (projectPath: string) => ipcRenderer.invoke('reset-session', projectPath),
-  onCliOutput: (callback: (projectId: string, data: string) => void) => 
+  onCliOutput: (callback: (projectId: string, data: string) => void) =>
     ipcRenderer.on('cli-output', (_, projectId, data) => callback(projectId, data)),
-  onCliError: (callback: (projectId: string, error: string) => void) => 
+  onCliStatus: (callback: (projectId: string, status: string) => void) =>
+    ipcRenderer.on('cli-status', (_, projectId, status) => callback(projectId, status)),
+  onCliError: (callback: (projectId: string, error: string) => void) =>
     ipcRenderer.on('cli-error', (_, projectId, error) => callback(projectId, error)),
   onCliDone: (callback: (projectId: string) => void) =>
     ipcRenderer.on('cli-done', (_, projectId) => callback(projectId)),

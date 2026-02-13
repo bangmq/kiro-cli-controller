@@ -7,91 +7,107 @@
     @apply bg-gray-900 text-gray-100;
   }
   
-  html.light {
-    @apply bg-white text-gray-900;
-  }
-  
   html.light body {
-    @apply bg-white text-gray-900;
+    background-color: #ffffff;
+    color: #111827;
   }
   
   html.light .bg-gray-900 {
-    @apply bg-white;
+    background-color: #ffffff;
   }
   
   html.light .bg-gray-800 {
-    @apply bg-gray-100;
+    background-color: #f3f4f6;
   }
   
   html.light .bg-gray-700 {
-    @apply bg-gray-200;
+    background-color: #e5e7eb;
   }
   
   html.light .border-gray-700 {
-    @apply border-gray-300;
+    border-color: #d1d5db;
   }
   
   html.light .text-gray-100 {
-    @apply text-gray-900;
+    color: #111827;
   }
   
   html.light .text-gray-400 {
-    @apply text-gray-600;
+    color: #4b5563;
   }
   
   html.light .text-gray-500 {
-    @apply text-gray-700;
+    color: #374151;
   }
 }
 
 @layer components {
+  .message-content {
+    @apply text-sm leading-relaxed;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .message-content > *:first-child {
+    margin-top: 0;
+  }
+
+  .message-content > *:last-child {
+    margin-bottom: 0;
+  }
+
   .message-content h1 {
-    @apply text-2xl font-bold mt-4 mb-2;
+    @apply text-lg font-bold mt-4 mb-2;
   }
   
   .message-content h2 {
-    @apply text-xl font-bold mt-3 mb-2;
+    @apply text-base font-bold mt-3 mb-2;
   }
   
   .message-content h3 {
-    @apply text-lg font-semibold mt-2 mb-1;
+    @apply text-sm font-semibold mt-2 mb-1;
   }
   
   .message-content p {
-    @apply my-2;
+    @apply my-1.5 leading-relaxed;
+    white-space: pre-wrap;
   }
   
   .message-content code {
-    @apply bg-gray-800 px-1.5 py-0.5 rounded text-sm font-mono text-blue-400;
+    @apply bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono text-blue-300;
   }
   
   html.light .message-content code {
-    @apply bg-gray-200 text-blue-600;
+    background-color: #e5e7eb;
+    color: #2563eb;
   }
   
   .message-content pre {
-    @apply bg-gray-800 p-4 rounded-lg overflow-x-auto my-3;
+    @apply bg-gray-900 rounded-lg overflow-x-auto my-2 p-0;
   }
   
   html.light .message-content pre {
-    @apply bg-gray-200;
+    background-color: #e5e7eb;
   }
   
   .message-content pre code {
-    @apply bg-transparent p-0 text-gray-300;
+    @apply bg-transparent p-3 text-xs text-gray-300 block;
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
   }
   
   html.light .message-content pre code {
-    @apply text-gray-800;
+    color: #1f2937;
   }
   
   .message-content ul,
   .message-content ol {
-    @apply my-2 pl-6;
+    @apply my-1.5 pl-5;
   }
   
   .message-content li {
-    @apply my-1;
+    @apply my-0.5 leading-relaxed;
   }
   
   .message-content ul li {
@@ -100,6 +116,50 @@
   
   .message-content ol li {
     @apply list-decimal;
+  }
+
+  .message-content li > p {
+    @apply my-0;
+  }
+
+  .message-content blockquote {
+    border-left: 2px solid rgba(59, 130, 246, 0.3);
+    @apply pl-3 my-1.5 text-xs not-italic;
+    color: #6b7280;
+  }
+
+  html.light .message-content blockquote {
+    color: #9ca3af;
+    border-left-color: rgba(96, 165, 250, 0.3);
+  }
+
+  .message-content hr {
+    @apply border-gray-700 my-3;
+  }
+
+  .message-content strong {
+    @apply font-semibold;
+    color: #f9fafb;
+  }
+
+  html.light .message-content strong {
+    color: #111827;
+  }
+
+  .message-content a {
+    @apply text-blue-400 underline;
+  }
+
+  .message-content table {
+    @apply w-full my-2 text-xs;
+  }
+
+  .message-content th {
+    @apply bg-gray-700 px-2 py-1 text-left font-semibold border border-gray-600;
+  }
+
+  .message-content td {
+    @apply px-2 py-1 border border-gray-700;
   }
   
   [draggable="true"] {

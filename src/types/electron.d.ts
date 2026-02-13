@@ -9,6 +9,7 @@ export interface ElectronAPI {
   stopCommand: (projectId?: string) => Promise<void>;
   resetSession: (projectPath: string) => Promise<void>;
   onCliOutput: (callback: (projectId: string, data: string) => void) => void;
+  onCliStatus: (callback: (projectId: string, status: string) => void) => void;
   onCliError: (callback: (projectId: string, error: string) => void) => void;
   onCliDone: (callback: (projectId: string) => void) => void;
   onProjectSetupProgress: (callback: (projectId: string, status: string) => void) => void;

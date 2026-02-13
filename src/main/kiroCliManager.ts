@@ -56,7 +56,7 @@ export class KiroCliManager {
     const isWindows = process.platform === 'win32';
     const isFirstMessage = !this.sessionStarted.get(options.projectPath);
 
-    const chatArgs = ['chat', '--no-interactive', '--wrap', 'never'];
+    const chatArgs = ['chat', '--no-interactive', '--trust-all-tools', '--wrap', 'never'];
 
     if (isFirstMessage) {
       chatArgs.push('--agent', options.agent);
@@ -69,22 +69,14 @@ export class KiroCliManager {
     if (isWindows) {
       const kiroCliPath = this.getWslKiroPath();
       const wslPath = options.projectPath.replace(/\\/g, '/').replace(/^([A-Z]):/, (_, d) => `/mnt/${d.toLowerCase()}`);
-      // base64로 메시지를 전달하여 한글 인코딩 보존
       const msgBase64 = Buffer.from(options.message, 'utf8').toString('base64');
       const chatArgsWithoutMsg = chatArgs.slice(0, -1);
       const escapedArgs = chatArgsWithoutMsg.map(a => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ');
       const bashCommand = `cd "${wslPath}" && ${kiroCliPath} ${escapedArgs} "$(echo '${msgBase64}' | base64 -d)"`;
-      return {
-        command: 'wsl',
-        args: ['-e', 'bash', '-c', bashCommand]
-      };
+      return { command: 'wsl', args: ['-e', 'bash', '-c', bashCommand] };
     }
 
-    return {
-      command: this.resolveKiroCliPath(),
-      args: chatArgs,
-      cwd: options.projectPath
-    };
+    return { command: this.resolveKiroCliPath(), args: chatArgs, cwd: options.projectPath };
   }
 
   private runKiroCli(args: string[], cwd?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -159,10 +151,6 @@ export class KiroCliManager {
     });
   }
 
-  /**
-   * 메타 에이전트를 사용하여 프로젝트 코드를 분석하고
-   * 적절한 agents, skills, steering 파일을 자동 생성
-   */
   setupProjectWithMetaAgent(
     projectPath: string,
     type: 'maintenance' | 'new-development',
@@ -174,44 +162,28 @@ export class KiroCliManager {
       : 'Analyze this project codebase. Read the file structure and key source files, then create appropriate .kiro/agents/ JSON configs (pm, architect, coder), .kiro/skills/ markdown files, and .kiro/steering/ markdown files tailored to this project. Each agent should have a specific role for developing new features.';
 
     const { command, args, cwd } = this.buildMetaCommand(projectPath, prompt);
-
-    console.log('[KiroCliManager] Meta agent spawning:', command);
     onProgress('analyzing');
 
     const proc = spawn(command, args, {
-      cwd,
-      env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
+      cwd, env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
     });
 
     let allOutput = '';
-
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
-
     proc.stdout?.on('data', (chunk: string) => { allOutput += chunk; });
     proc.stderr?.on('data', (chunk: string) => {
-      console.log('[KiroCliManager] Meta stderr:', chunk.substring(0, 200));
       allOutput += chunk;
-      // 진행 상태 추정
       if (/reading|read|scanning/i.test(chunk)) onProgress('reading');
       if (/creating|writing|generat/i.test(chunk)) onProgress('generating');
     });
 
-    proc.on('error', (err) => {
-      onDone(false, err.message);
-    });
-
-    proc.on('close', (code) => {
-      console.log('[KiroCliManager] Meta agent closed, code:', code);
+    proc.on('error', (err) => { onDone(false, err.message); });
+    proc.on('close', () => {
       onProgress('finalizing');
-      // 성공 여부는 .kiro/agents/ 에 파일이 생겼는지로 판단
       const agentsDir = path.join(projectPath, '.kiro', 'agents');
       const hasAgents = fs.existsSync(agentsDir) && fs.readdirSync(agentsDir).some(f => f.endsWith('.json'));
-      if (hasAgents) {
-        onDone(true);
-      } else {
-        onDone(false, 'Meta agent did not generate agent configs');
-      }
+      onDone(hasAgents, hasAgents ? undefined : 'Meta agent did not generate agent configs');
     });
   }
 
@@ -229,11 +201,7 @@ export class KiroCliManager {
       return { command: 'wsl', args: ['-e', 'bash', '-c', bashCommand] };
     }
 
-    return {
-      command: this.resolveKiroCliPath(),
-      args: chatArgs,
-      cwd: projectPath
-    };
+    return { command: this.resolveKiroCliPath(), args: chatArgs, cwd: projectPath };
   }
 
   private stripAnsi(text: string): string {
@@ -249,46 +217,99 @@ export class KiroCliManager {
       .replace(/^>\s*/gm, '');
   }
 
+  private isNoiseLine(t: string): boolean {
+    if (/^Error:/i.test(t)) return true;
+    if (/^Model:/i.test(t)) return true;
+    if (/^Time:\s*\d+/i.test(t)) return true;
+    if (/Picking up where we left off/i.test(t)) return true;
+    if (/Define indexed resources/i.test(t)) return true;
+    if (/Welcome to Kiro/i.test(t)) return true;
+    if (/^Did you know/i.test(t)) return true;
+    if (/^Run \/prompts/i.test(t)) return true;
+    if (/^Use \/tangent/i.test(t)) return true;
+    if (/enable custom tools with MCP/i.test(t)) return true;
+    if (/All tools are now trusted/i.test(t)) return true;
+    if (/understand the risks/i.test(t)) return true;
+    if (/Learn more at https:\/\//i.test(t)) return true;
+    if (/^[╭╰│═─┌┐└┘├┤┬┴┼⠀⋮↱]/.test(t)) return true;
+    if (/^[💡🔧▸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(t)) return true;
+    if (/^Thinking\.\.\./i.test(t)) return true;
+    if (/^Completed in \d+/i.test(t)) return true;
+    if (/^Purpose:/i.test(t)) return true;
+    return false;
+  }
+
+  private extractToolStatus(t: string): string | null | undefined {
+    const readFile = t.match(/^Reading file:\s*(.+?)(?:,|\s*\()/i);
+    if (readFile) return `📄 ${readFile[1].trim().split('/').pop()} 읽는 중...`;
+
+    const readDir = t.match(/^Reading directory:\s*(.+?)(?:\s*\()/i);
+    if (readDir) return `📁 ${readDir[1].trim().split('/').pop()}/ 탐색 중...`;
+
+    if (/^I will run the following command:/i.test(t)) return '⚡ 명령어 실행 중...';
+
+    const modify = t.match(/^I'll modify the following file:\s*(.+?)(?:\s*\()/i);
+    if (modify) return `✏️ ${modify[1].trim().split('/').pop()} 수정 중...`;
+
+    if (/^Updating:\s*(.+)/i.test(t)) return `💾 ${t.replace(/^Updating:\s*/i, '').trim().split('/').pop()} 저장 중...`;
+
+    if (/^✓ Successfully found (\d+) files/i.test(t)) {
+      const m = t.match(/(\d+) files/);
+      return m ? `🔍 ${m[1]}개 파일 발견` : null;
+    }
+    if (/^✓ Successfully/i.test(t)) return null;
+    if (/^Completed in \d+/i.test(t)) return null;
+
+    // 배치 작업 로그
+    if (/^[↱⋮]\s*Operation \d+/i.test(t)) return null;
+    if (/^Operation \d+/i.test(t)) return null;
+    if (/^⋮\s*$/.test(t)) return null;
+    if (/^Summary:\s*\d+ operations/i.test(t)) {
+      const m = t.match(/(\d+) successful/i);
+      return m ? `✅ ${m[1]}개 작업 완료` : null;
+    }
+
+    if (/\(using tool:\s*\w+\)/i.test(t)) return null;
+
+    return undefined; // undefined = 일반 응답 라인
+  }
+
   private extractResponse(raw: string): string {
     const stripped = this.stripAnsi(raw);
     const lines = stripped.split('\n');
-    const filtered = lines.filter(line => {
-      const t = line.trim();
-      if (!t) return false;
-      if (/^Error:/i.test(t)) return false;
-      if (/^Model:/i.test(t)) return false;
-      if (/^Time:\s*\d+/i.test(t)) return false;
-      if (/Time:\s*\d+s\s*$/i.test(t)) {
-        // "응답내용 Time: 3s" 형태에서 Time 부분만 제거
-        return true;
-      }
-      if (/Picking up where we left off/i.test(t)) return false;
-      if (/Define indexed resources/i.test(t)) return false;
-      if (/Welcome to Kiro/i.test(t)) return false;
-      if (/^Did you know/i.test(t)) return false;
-      if (/^Run \/prompts/i.test(t)) return false;
-      if (/^Use \/tangent/i.test(t)) return false;
-      if (/enable custom tools with MCP/i.test(t)) return false;
-      if (/^[╭╰│═─┌┐└┘├┤┬┴┼⠀]/.test(t)) return false;
-      if (/^[💡🔧▸⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(t)) return false;
-      if (/^Thinking\.\.\./i.test(t)) return false;
-      return true;
-    }).map(line => {
-      // 라인 끝의 "Time: Xs" 제거
-      return line.replace(/\s*▸?\s*Time:\s*\d+s\s*$/i, '').trimEnd();
-    });
+    const result: string[] = [];
 
-    return filtered.join('\n').trim();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) {
+        result.push('');
+        continue;
+      }
+      if (this.isNoiseLine(t)) continue;
+
+      const status = this.extractToolStatus(t);
+      if (status === null) continue; // 도구 로그지만 표시 불필요
+      if (status !== undefined) continue; // 도구 상태 메시지 (별도 채널로 전송됨)
+
+      result.push(
+        line
+          .replace(/\s*▸?\s*Time:\s*\d+s\s*$/i, '')
+          .replace(/\s*Completed in \d+[\d.]*s?\s*/gi, '')
+          .trimEnd()
+      );
+    }
+
+    return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   sendMessage(
     projectId: string,
     options: KiroCliOptions,
     onData: (data: string) => void,
+    onStatus: (status: string) => void,
     onError: (error: string) => void,
     onDone: () => void
   ): void {
-    // 이전 프로세스가 아직 실행 중이면 무시
     const existing = this.activeProcesses.get(projectId);
     if (existing) {
       onError('Previous message is still processing.');
@@ -296,32 +317,58 @@ export class KiroCliManager {
     }
 
     const { command, args, cwd } = this.buildCommand(options);
-
     console.log('[KiroCliManager] Spawning:', command, args.join(' ').substring(0, 200));
 
     const proc = spawn(command, args, {
-      cwd,
-      env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
+      cwd, env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
     });
 
     this.activeProcesses.set(projectId, { proc, projectId });
-
     let allOutput = '';
 
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
 
+    // stderr/stdout를 실시간으로 파싱하여 도구 상태를 즉시 전달
+    let statusSent = false;
+    const processChunkForStatus = (chunk: string) => {
+      const stripped = this.stripAnsi(chunk);
+      for (const line of stripped.split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+
+        // 초기 로딩 상태
+        if (/Thinking\.\.\./i.test(t) || /^Model:/i.test(t)) {
+          onStatus('🤔 생각하는 중...');
+          statusSent = true;
+          continue;
+        }
+        if (/Picking up where we left off/i.test(t)) {
+          onStatus('🔄 이전 대화 불러오는 중...');
+          statusSent = true;
+          continue;
+        }
+
+        const status = this.extractToolStatus(t);
+        if (status) {
+          onStatus(status);
+          statusSent = true;
+        }
+      }
+    };
+
     proc.stdout?.on('data', (chunk: string) => {
       allOutput += chunk;
+      processChunkForStatus(chunk);
     });
 
     proc.stderr?.on('data', (chunk: string) => {
       console.log('[KiroCliManager] stderr:', chunk.substring(0, 200));
       allOutput += chunk;
+      processChunkForStatus(chunk);
     });
 
     proc.on('error', (err) => {
-      console.error('[KiroCliManager] Process error:', err.message);
       this.activeProcesses.delete(projectId);
       onError(err.message);
       onDone();
@@ -336,8 +383,18 @@ export class KiroCliManager {
       if (response) {
         this.sessionStarted.set(options.projectPath, true);
         onData(response);
-      } else if (code !== 0) {
-        onError(`kiro-cli exited with code ${code}`);
+      }
+
+      if (code !== 0) {
+        const errorMatch = allOutput.match(/error:\s*(.+)/i);
+        const errorMsg = errorMatch ? errorMatch[1].trim() : `kiro-cli exited with code ${code}`;
+        if (!response) {
+          onError(errorMsg);
+        } else {
+          onData('\n\n⚠️ ' + errorMsg);
+        }
+      } else if (response) {
+        this.sessionStarted.set(options.projectPath, true);
       }
 
       onDone();

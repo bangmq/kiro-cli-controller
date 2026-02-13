@@ -35,6 +35,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
   const { getSetupState } = useSetup();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const handlersRegistered = useRef(false);
   const currentProjectId = useRef(project.id);
@@ -44,6 +45,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
   useEffect(() => {
     currentProjectId.current = project.id;
     setMessages(getConversation(project.id));
+    setToolStatus(null);
   }, [project.id]);
 
   useEffect(() => {
@@ -74,37 +76,45 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
       }
     });
 
+    window.electronAPI.onCliStatus((projectId: string, status: string) => {
+      if (projectId === currentProjectId.current) {
+        setToolStatus(status);
+      }
+    });
+
     window.electronAPI.onCliError((projectId: string, error: string) => {
       setConversation(projectId, (prev) => [...prev, { role: 'assistant', content: `Error: ${error}` }]);
       if (projectId === currentProjectId.current) {
         setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error}` }]);
+        setToolStatus(null);
       }
       setLoading(projectId, false);
     });
 
     window.electronAPI.onCliDone((projectId: string) => {
       setLoading(projectId, false);
+      if (projectId === currentProjectId.current) {
+        setToolStatus(null);
+      }
     });
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, toolStatus]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
-
     const messageToSend = input;
     setMessages(prev => [...prev, { role: 'user', content: messageToSend }]);
     setLoading(project.id, true);
+    setToolStatus(null);
     setInput('');
-
     await window.electronAPI.sendMessage(project.id, project.path, project.mainAgent, messageToSend);
   };
 
   const currentIsLoading = isLoading(project.id);
 
-  // 프로젝트가 생성 중이면 로딩 화면 표시
   if (setupState) {
     const msgKey = setupStatusMessages[setupState.status];
     return (
@@ -126,9 +136,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
               <div className="w-16 h-16 mx-auto mb-4 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
             )}
             <p className="text-sm text-gray-300">{msgKey ? t(msgKey as any) : ''}</p>
-            {setupState.error && (
-              <p className="text-xs text-gray-500 mt-2">{setupState.error}</p>
-            )}
+            {setupState.error && <p className="text-xs text-gray-500 mt-2">{setupState.error}</p>}
           </div>
         </div>
       </div>
@@ -147,9 +155,7 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
-              msg.role === 'user' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-800 text-gray-100'
+              msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-100'
             }`}>
               <div className="message-content">
                 {msg.role === 'assistant' ? (
@@ -163,18 +169,25 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
         ))}
         {currentIsLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 rounded-xl px-3 py-2">
-              <div className="flex space-x-2">
-                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
-                <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
-              </div>
+            <div className="bg-gray-800/60 rounded-xl px-3 py-2">
+              {toolStatus ? (
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  <span>{toolStatus}</span>
+                </div>
+              ) : (
+                <div className="flex space-x-2">
+                  <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                  <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                  <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                </div>
+              )}
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
-      
+
       <div className="p-3 border-t border-gray-700 bg-gray-800/50 backdrop-blur">
         <div className="flex gap-2">
           <input
@@ -186,8 +199,8 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
             disabled={currentIsLoading}
             className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 transition-all"
           />
-          <button 
-            onClick={handleSend} 
+          <button
+            onClick={handleSend}
             disabled={currentIsLoading || !input.trim()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
           >
