@@ -150,12 +150,40 @@ function setupIpcHandlers() {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle('create-project', async (_, name: string, projectPath: string, type: 'maintenance' | 'new-development') => {
+  ipcMain.handle('create-project', async (event, name: string, projectPath: string, type: 'maintenance' | 'new-development') => {
+    // 1. 기본 .kiro 디렉토리 생성
     await kiroCliManager.initProject(projectPath, type);
+    
+    // 2. 프로젝트를 DB에 먼저 등록 (생성 중 상태)
     const project = await projectManager.addProject(name, projectPath, type);
-    if (process.platform === 'win32') {
-      await setupWindowsJumpList();
-    }
+    
+    // 3. 메타 에이전트로 비동기 설정 생성
+    event.sender.send('project-setup-progress', project.id, 'starting');
+    
+    kiroCliManager.setupProjectWithMetaAgent(
+      projectPath,
+      type,
+      (progress) => {
+        event.sender.send('project-setup-progress', project.id, progress);
+      },
+      async (success, error) => {
+        if (success) {
+          // 생성된 에이전트 중 첫 번째를 mainAgent로 설정
+          try {
+            const config = await projectConfigManager.load(projectPath);
+            if (config.agents.length > 0) {
+              const mainAgentName = config.agents[0].name;
+              await projectManager.updateMainAgent(project.id, mainAgentName);
+            }
+          } catch {}
+        }
+        event.sender.send('project-setup-done', project.id, success, error || null);
+        if (process.platform === 'win32') {
+          await setupWindowsJumpList();
+        }
+      }
+    );
+    
     return project;
   });
 

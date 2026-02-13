@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('cli-error', (_, projectId, error) => callback(projectId, error)),
   onCliDone: (callback: (projectId: string) => void) =>
     ipcRenderer.on('cli-done', (_, projectId) => callback(projectId)),
+  onProjectSetupProgress: (callback: (projectId: string, status: string) => void) =>
+    ipcRenderer.on('project-setup-progress', (_, projectId, status) => callback(projectId, status)),
+  onProjectSetupDone: (callback: (projectId: string, success: boolean, error: string | null) => void) =>
+    ipcRenderer.on('project-setup-done', (_, projectId, success, error) => callback(projectId, success, error)),
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),

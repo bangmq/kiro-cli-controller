@@ -154,34 +154,86 @@ export class KiroCliManager {
     const kiroDir = path.join(projectPath, '.kiro');
     const agentsDir = path.join(kiroDir, 'agents');
     await fs.ensureDir(agentsDir);
-
-    if (type === 'maintenance') {
-      await fs.writeJson(path.join(agentsDir, 'pm.json'), {
-        name: 'pm_agent', description: 'Project Manager for maintenance tasks',
-        prompt: 'You are a project manager coordinating maintenance work.'
-      });
-      await fs.writeJson(path.join(agentsDir, 'analyst.json'), {
-        name: 'analyst_agent', description: 'Code Analyst for review and analysis',
-        prompt: 'You are a code analyst reviewing and analyzing code.'
-      });
-      await fs.writeJson(path.join(agentsDir, 'coder.json'), {
-        name: 'coder_agent', description: 'Developer for implementation',
-        prompt: 'You are a developer implementing code changes.'
-      });
-    } else {
-      await fs.writeJson(path.join(agentsDir, 'pm.json'), {
-        name: 'pm_agent', description: 'Project Manager for new development',
-        prompt: 'You are a project manager coordinating new development.'
-      });
-      await fs.writeJson(path.join(agentsDir, 'architect.json'), {
-        name: 'architect_agent', description: 'System Architect for design',
-        prompt: 'You are a system architect designing the system.'
-      });
-    }
-
     await fs.writeJson(path.join(kiroDir, 'config.json'), {
       projectPath, type, createdAt: new Date().toISOString()
     });
+  }
+
+  /**
+   * 메타 에이전트를 사용하여 프로젝트 코드를 분석하고
+   * 적절한 agents, skills, steering 파일을 자동 생성
+   */
+  setupProjectWithMetaAgent(
+    projectPath: string,
+    type: 'maintenance' | 'new-development',
+    onProgress: (message: string) => void,
+    onDone: (success: boolean, error?: string) => void
+  ): void {
+    const prompt = type === 'maintenance'
+      ? 'Analyze this project codebase. Read the file structure and key source files, then create appropriate .kiro/agents/ JSON configs (pm, analyst, coder), .kiro/skills/ markdown files, and .kiro/steering/ markdown files tailored to this project. Each agent should have a specific role for maintaining this codebase.'
+      : 'Analyze this project codebase. Read the file structure and key source files, then create appropriate .kiro/agents/ JSON configs (pm, architect, coder), .kiro/skills/ markdown files, and .kiro/steering/ markdown files tailored to this project. Each agent should have a specific role for developing new features.';
+
+    const { command, args, cwd } = this.buildMetaCommand(projectPath, prompt);
+
+    console.log('[KiroCliManager] Meta agent spawning:', command);
+    onProgress('analyzing');
+
+    const proc = spawn(command, args, {
+      cwd,
+      env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
+    });
+
+    let allOutput = '';
+
+    proc.stdout?.setEncoding('utf8');
+    proc.stderr?.setEncoding('utf8');
+
+    proc.stdout?.on('data', (chunk: string) => { allOutput += chunk; });
+    proc.stderr?.on('data', (chunk: string) => {
+      console.log('[KiroCliManager] Meta stderr:', chunk.substring(0, 200));
+      allOutput += chunk;
+      // 진행 상태 추정
+      if (/reading|read|scanning/i.test(chunk)) onProgress('reading');
+      if (/creating|writing|generat/i.test(chunk)) onProgress('generating');
+    });
+
+    proc.on('error', (err) => {
+      onDone(false, err.message);
+    });
+
+    proc.on('close', (code) => {
+      console.log('[KiroCliManager] Meta agent closed, code:', code);
+      onProgress('finalizing');
+      // 성공 여부는 .kiro/agents/ 에 파일이 생겼는지로 판단
+      const agentsDir = path.join(projectPath, '.kiro', 'agents');
+      const hasAgents = fs.existsSync(agentsDir) && fs.readdirSync(agentsDir).some(f => f.endsWith('.json'));
+      if (hasAgents) {
+        onDone(true);
+      } else {
+        onDone(false, 'Meta agent did not generate agent configs');
+      }
+    });
+  }
+
+  private buildMetaCommand(projectPath: string, message: string): { command: string; args: string[]; cwd?: string } {
+    const isWindows = process.platform === 'win32';
+    const chatArgs = ['chat', '--no-interactive', '--trust-all-tools', '--wrap', 'never', message];
+
+    if (isWindows) {
+      const kiroCliPath = this.getWslKiroPath();
+      const wslPath = projectPath.replace(/\\/g, '/').replace(/^([A-Z]):/, (_, d) => `/mnt/${d.toLowerCase()}`);
+      const msgBase64 = Buffer.from(message, 'utf8').toString('base64');
+      const argsWithoutMsg = chatArgs.slice(0, -1);
+      const escapedArgs = argsWithoutMsg.map(a => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ');
+      const bashCommand = `cd "${wslPath}" && ${kiroCliPath} ${escapedArgs} "$(echo '${msgBase64}' | base64 -d)"`;
+      return { command: 'wsl', args: ['-e', 'bash', '-c', bashCommand] };
+    }
+
+    return {
+      command: this.resolveKiroCliPath(),
+      args: chatArgs,
+      cwd: projectPath
+    };
   }
 
   private stripAnsi(text: string): string {

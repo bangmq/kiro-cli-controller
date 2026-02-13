@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { useI18n, useConversation } from '../app';
+import { useI18n, useConversation, useSetup } from '../app';
 
 interface Project {
   id: string;
@@ -19,14 +19,27 @@ interface Props {
   project: Project;
 }
 
+const setupStatusMessages: Record<string, string> = {
+  starting: 'creatingProject',
+  analyzing: 'setupAnalyzing',
+  reading: 'setupReading',
+  generating: 'setupGenerating',
+  finalizing: 'setupFinalizing',
+  done: 'setupComplete',
+  error: 'setupFailed',
+};
+
 const ChatInterface: React.FC<Props> = ({ project }) => {
   const { t } = useI18n();
   const { getConversation, setConversation, isLoading, setLoading } = useConversation();
+  const { getSetupState } = useSetup();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const handlersRegistered = useRef(false);
   const currentProjectId = useRef(project.id);
+
+  const setupState = getSetupState(project.id);
 
   useEffect(() => {
     currentProjectId.current = project.id;
@@ -37,7 +50,6 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
     setConversation(project.id, messages);
   }, [messages, project.id]);
 
-  // IPC 리스너는 한 번만 등록
   useEffect(() => {
     if (handlersRegistered.current) return;
     handlersRegistered.current = true;
@@ -91,6 +103,37 @@ const ChatInterface: React.FC<Props> = ({ project }) => {
   };
 
   const currentIsLoading = isLoading(project.id);
+
+  // 프로젝트가 생성 중이면 로딩 화면 표시
+  if (setupState) {
+    const msgKey = setupStatusMessages[setupState.status];
+    return (
+      <div className="flex flex-col h-full">
+        <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/50 backdrop-blur">
+          <div className="text-sm font-semibold truncate">{project.name}</div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            {setupState.status === 'done' ? (
+              <svg className="w-16 h-16 mx-auto mb-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : setupState.status === 'error' ? (
+              <svg className="w-16 h-16 mx-auto mb-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            ) : (
+              <div className="w-16 h-16 mx-auto mb-4 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            )}
+            <p className="text-sm text-gray-300">{msgKey ? t(msgKey as any) : ''}</p>
+            {setupState.error && (
+              <p className="text-xs text-gray-500 mt-2">{setupState.error}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

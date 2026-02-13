@@ -1,27 +1,75 @@
 import React, { useState } from 'react';
-import { useI18n } from '../app';
+import { useI18n, useSetup } from '../app';
 
 interface Props {
   onCancel: () => void;
-  onCreate: (name: string, path: string, type: 'maintenance' | 'new-development') => void;
+  onCreated: () => void;
 }
 
-const CreateProject: React.FC<Props> = ({ onCancel, onCreate }) => {
+const setupStatusMessages: Record<string, string> = {
+  starting: 'creatingProject',
+  analyzing: 'setupAnalyzing',
+  reading: 'setupReading',
+  generating: 'setupGenerating',
+  finalizing: 'setupFinalizing',
+  done: 'setupComplete',
+  error: 'setupFailed',
+};
+
+const CreateProject: React.FC<Props> = ({ onCancel, onCreated }) => {
   const { t } = useI18n();
+  const { setupStates } = useSetup();
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
   const [type, setType] = useState<'maintenance' | 'new-development'>('maintenance');
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
 
   const handleSelectFolder = async () => {
     const selectedPath = await window.electronAPI.selectFolder();
     if (selectedPath) setPath(selectedPath);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (name && path) {
-      onCreate(name, path, type);
+      const project = await window.electronAPI.createProject(name, path, type);
+      setCreatedProjectId(project.id);
+      onCreated();
     }
   };
+
+  const setupState = createdProjectId ? setupStates.get(createdProjectId) : undefined;
+  const isCreating = !!createdProjectId;
+
+  if (isCreating) {
+    const status = setupState?.status || 'starting';
+    const msgKey = setupStatusMessages[status];
+
+    if (status === 'done' || status === 'error') {
+      setTimeout(() => onCancel(), status === 'done' ? 1500 : 3000);
+    }
+
+    return (
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-gray-800 rounded-xl shadow-2xl p-8 text-center">
+          {status === 'done' ? (
+            <svg className="w-16 h-16 mx-auto mb-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : status === 'error' ? (
+            <svg className="w-16 h-16 mx-auto mb-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          ) : (
+            <div className="w-16 h-16 mx-auto mb-4 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          )}
+          <p className="text-sm text-gray-300">{msgKey ? t(msgKey as any) : t('creatingProject')}</p>
+          {setupState?.error && (
+            <p className="text-xs text-gray-500 mt-2">{setupState.error}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center p-6">
